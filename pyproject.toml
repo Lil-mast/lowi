@@ -8,7 +8,9 @@ dependencies = [
     "arq",
     "elevenlabs",
     "fastapi",
+    "httpx>=0.28.1",
     "openai",
+    "psycopg[binary]>=3.3.6",
     "pydantic-settings",
     "python-multipart",
     "sqlalchemy",
@@ -32,6 +34,10 @@ package = false
 [tool.ruff]
 target-version = "py314"
 src = ["app", "tests", "scripts"]
+
+[tool.ruff.lint]
+# FastAPI uses Depends() in argument defaults.
+ignore = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

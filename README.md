@@ -185,8 +185,10 @@ cp .env.example .env
 
 # 4. Schema (dev): SQLAlchemy create_all — no Alembic yet
 
-# 5. Run API
+# 5. Run API (open /docs — the bare host used to 404)
 uv run uvicorn app.main:app --reload
+# http://127.0.0.1:8000/          index
+# http://127.0.0.1:8000/docs      interactive API
 
 # 6. Streamlit UI (talks to the API)
 uv sync --group frontend
@@ -293,6 +295,8 @@ Simple webhook POST with embeds (title, action items as fields, link to PDF).
 - **Privacy-aware** – audio can be deleted after transcription if desired; store only what you need.
 
 ---
+
+Feature notes: [docs/features.md](docs/features.md).
 
 Built for people who want meeting notes without the administrative drag.
 ```
