@@ -1,0 +1,35 @@
+[project]
+name = "lowi"
+version = "0.1.0"
+description = "Meeting intelligence agent"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic",
+    "arq",
+    "boto3",
+    "elevenlabs",
+    "fastapi",
+    "pydantic-settings",
+    "python-multipart",
+    "sqlalchemy",
+    "uvicorn[standard]",
+    "weasyprint",
+]
+
+[dependency-groups]
+dev = [
+    "httpx",
+    "pytest",
+    "ruff",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py314"
+src = ["app", "tests", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
