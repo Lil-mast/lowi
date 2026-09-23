@@ -1,1 +1,1 @@
-"""LLM summarization."""
+"""Meeting summarization via AgentRouter models."""

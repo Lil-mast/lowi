@@ -1,1 +1,1 @@
-"""Meeting preparation brief."""
+"""Meeting preparation brief via AgentRouter models."""

@@ -24,20 +24,10 @@ It helps you:
                     ┌──────────────┼──────────────┐
                     ▼              ▼              ▼
              ┌────────────┐ ┌────────────┐ ┌────────────┐
-             │ ElevenLabs │ │  LLM       │ │  Discord   │
-             │ Scribe v2  │ │ (OpenAI /  │ │  Webhook   │
-             │ (STT)      │ │  Claude /  │ │            │
-             └────────────┘ │  Grok)     │ └────────────┘
-                            └────────────┘
-                                   │
-                                   ▼
-                            ┌────────────┐
-                            │ Object     │
-                            │ Storage    │
-                            │ (R2 / S3)  │
-                            │ audio +    │
-                            │ PDFs       │
-                            └────────────┘
+             │ ElevenLabs │ │ AgentRouter│ │  Discord   │
+             │ Scribe v2  │ │ LLM models │ │  Webhook   │
+             │ (STT)      │ │            │ │            │
+             └────────────┘ └────────────┘ └────────────┘
 ```
 
 ### Core Flow
@@ -64,9 +54,9 @@ It helps you:
 
 5. **Distribute & Archive**
    - Post formatted summary to Discord (webhook or bot)
-   - Generate a clean PDF
-   - Store transcript, summary, and PDF references in Neon
-   - Optionally notify via email or other channels
+   - Render a PDF on download (no blob store yet)
+   - Store transcript and summary JSON in Neon
+   - Optionally notify via email or other channels later
 
 ### Recommended Tech Stack
 
@@ -74,15 +64,15 @@ It helps you:
 |--------------------|----------------------------------|-------|
 | API                | **FastAPI**                      | Async, great DX, automatic OpenAPI |
 | Database           | **Neon** (Postgres)              | Serverless Postgres, branching, good for AI apps |
-| ORM / Migrations   | SQLAlchemy 2.0 + Alembic         | Or Prisma if preferred |
+| ORM / schema       | SQLAlchemy 2.0 + `create_all`    | No Alembic yet — see below |
 | Background jobs    | **ARQ** (Redis) or Celery        | Start with ARQ for simplicity |
 | Transcription      | **ElevenLabs Scribe v2**         | Excellent accuracy + diarization + Python SDK |
-| LLM                | Agent router   | Structured output via JSON mode or tool calling |
-| Object storage     | Cloudflare R2 or AWS S3          | Cheap storage for audio + PDFs |
-| PDF generation     | WeasyPrint or ReportLab          | Markdown → PDF is cleanest |
+| LLM                | **AgentRouter**                  | Token models: `claude-opus-4-8`, `deepseek-v4-flash` |
+| Object storage     | Deferred                         | Local `data/` if needed; R2/S3 later |
+| PDF generation     | WeasyPrint                       | Generate on download, do not archive blobs yet |
 | Auth               | JWT (simple) or Clerk / Auth0    | Start simple |
-| Calendar (optional)| Google Calendar API              | For automatic prep triggers |
-| Frontend (optional)| Streamlit  | API-first design |
+| Calendar (optional)| Google Calendar / Zapier later   | After core pipeline |
+| Frontend           | **Streamlit**                    | Thin UI over the FastAPI API |
 | Discord            | Webhook (easiest) or discord.py  | Webhook is enough for summaries |
 
 **Why ElevenLabs for transcription?**  
@@ -100,7 +90,7 @@ lowi/
 │   ├── db/
 │   │   ├── session.py
 │   │   ├── models.py           # SQLAlchemy models
-│   │   └── migrations/         # Alembic
+│   │   └── migrations/         # Optional SQL later; unused for now
 │   ├── api/
 │   │   ├── routes/
 │   │   │   ├── meetings.py
@@ -109,18 +99,21 @@ lowi/
 │   │   └── deps.py
 │   ├── services/
 │   │   ├── transcription.py    # ElevenLabs client
-│   │   ├── summarizer.py       # LLM summarization
+│   │   ├── summarizer.py       # AgentRouter summarization
 │   │   ├── prep.py             # Meeting preparation brief
 │   │   ├── discord.py          # Discord webhook
 │   │   ├── pdf.py              # PDF generation
-│   │   └── storage.py          # R2/S3 upload
+│   │   └── storage.py          # Local files for now (R2 deferred)
 │   ├── workers/
 │   │   └── tasks.py            # Background jobs (ARQ)
 │   └── schemas/                # Pydantic models
-├── frontend/                   # Optional simple UI
+├── frontend/
+│   └── app.py                  # Streamlit UI (calls FastAPI)
 ├── scripts/
 │   └── seed.py
 ├── tests/
+├── docs/
+│   └── zapier.md               # Deferred Zapier MCP integrations
 ├── .env.example
 ├── pyproject.toml
 ├── uv.lock
@@ -135,9 +128,9 @@ Key tables:
 
 - **users** – id, email, name, discord_webhook_url, settings
 - **meetings** – id, user_id, title, scheduled_at, status, calendar_event_id, prep_brief
-- **recordings** – id, meeting_id, storage_key, duration_seconds, status
+- **recordings** – id, meeting_id, local_path (optional), duration_seconds, status
 - **transcripts** – id, meeting_id, raw_text, diarized_json, language
-- **summaries** – id, meeting_id, structured_json, narrative, pdf_storage_key
+- **summaries** – id, meeting_id, structured_json, narrative
 - **action_items** – id, meeting_id, description, owner, due_date, status
 
 Use JSONB columns liberally for the structured summary and diarized transcript so you stay flexible.
@@ -166,12 +159,11 @@ The heavy lifting (transcription → summarize → PDF → Discord) runs as a ba
 # .env.example
 DATABASE_URL=postgresql://...@ep-xxx.us-east-2.aws.neon.tech/neondb
 ELEVENLABS_API_KEY=sk_...
-OPENAI_API_KEY=sk-...                # or ANTHROPIC_API_KEY / XAI_API_KEY
+AGENTROUTER_API_KEY=sk_...
+AGENTROUTER_BASE_URL=https://agentrouter.org/v1
+AGENTROUTER_SUMMARY_MODEL=claude-opus-4-8
+AGENTROUTER_PREP_MODEL=deepseek-v4-flash
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-R2_ACCESS_KEY_ID=...
-R2_SECRET_ACCESS_KEY=...
-R2_BUCKET=meeting-agent
-R2_ENDPOINT=https://xxx.r2.cloudflarestorage.com
 REDIS_URL=redis://localhost:6379
 SECRET_KEY=change-me
 ```
@@ -191,13 +183,16 @@ uv sync
 cp .env.example .env
 # fill in keys
 
-# 4. Migrations
-uv run alembic upgrade head
+# 4. Schema (dev): SQLAlchemy create_all — no Alembic yet
 
 # 5. Run API
 uv run uvicorn app.main:app --reload
 
-# 6. (Optional) Run worker
+# 6. Streamlit UI (talks to the API)
+uv sync --group frontend
+uv run streamlit run frontend/app.py
+
+# 7. (Optional) Run worker
 uv run arq app.workers.tasks.WorkerSettings
 ```
 
@@ -221,13 +216,52 @@ transcription = client.speech_to_text.convert(
 )
 ```
 
-### Summarization Prompt (example)
+### Summarization (AgentRouter)
 
-Force structured JSON output with fields: `decisions`, `action_items`, `open_questions`, `key_points`, `narrative`.
+All LLM calls go through **[AgentRouter](https://agentrouter.org/)** (`https://agentrouter.org/v1`), not vendor SDKs. It is OpenAI-compatible (`/v1/chat/completions`). Get a key at [the token console](https://agentrouter.org/console/token).
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=settings.AGENTROUTER_API_KEY,
+    base_url=settings.AGENTROUTER_BASE_URL,  # https://agentrouter.org/v1
+)
+
+completion = client.chat.completions.create(
+    model=settings.AGENTROUTER_SUMMARY_MODEL,
+    response_format={"type": "json_object"},
+    messages=[...],
+)
+```
+
+This token can call `claude-opus-4-8`, `claude-opus-5`, `deepseek-v4-flash`, and `gpt-6-astra`. We use **`claude-opus-4-8` for summaries** and **`deepseek-v4-flash` for prep**. Do not use `gpt-6-astra` or `claude-opus-5`. AgentRouter tops up quota twice daily (10:00 and 19:00 Beijing / 02:00 and 11:00 UTC). Cursor is a supported client.
+
+Use `AGENTROUTER_SUMMARY_MODEL` for structured notes and `AGENTROUTER_PREP_MODEL` for shorter prep briefs. Force JSON with fields: `decisions`, `action_items`, `open_questions`, `key_points`, `narrative`.
+
+### Schema (no Alembic for now)
+
+Alembic is the usual SQLAlchemy companion, but it is extra ceremony while the tables are still changing. For v1 we create tables from models (`create_all`). Alternatives if we outgrow that:
+
+| Tool | Fit |
+|---|---|
+| **SQLAlchemy `create_all`** | Fastest for early Neon; no migration history |
+| **Plain `.sql` files** | Explicit, easy to review; we apply them ourselves |
+| **Atlas** | Desired-state schema, good later if we want migrations without Alembic |
+| **Alembic** | Add when production data must migrate in place |
+| **Prisma** | Different ORM; do not mix with SQLAlchemy |
+
+### Object storage (deferred)
+
+Audio and PDFs do not need R2/S3 yet. Transcribe, keep text + JSON in Neon, and **render the PDF when someone downloads it**. Optional temp files go under `data/` (gitignored). Add Cloudflare R2 when we must keep original audio or serve PDFs as stable URLs.
+
+### Streamlit
+
+The backend stays API-first. Streamlit is a Python UI that calls FastAPI (create meeting, upload audio, show prep/summary, trigger Discord). It is faster to ship than a React app and matches this stack. It is not a replacement for the API: no business logic in `frontend/app.py`.
 
 ### PDF
 
-Convert the structured summary + transcript excerpt into Markdown, then render with WeasyPrint for nice typography.
+Convert the structured summary + transcript excerpt into Markdown, then render with WeasyPrint when `/meetings/{id}/pdf` is requested.
 
 ### Discord
 
@@ -238,6 +272,9 @@ Simple webhook POST with embeds (title, action items as fields, link to PDF).
 ## Roadmap / Next Steps
 
 - [x] Core upload → transcribe → summarize → Discord + PDF
+- [ ] Streamlit UI over the API
+- [ ] Object storage (R2/S3) when we need to keep audio or stable PDF URLs
+- [ ] Zapier MCP integrations (Calendar, Gmail, extra Discord) — see [docs/zapier.md](docs/zapier.md)
 - [ ] Calendar-triggered prep (Google Calendar)
 - [ ] Browser-based live recording
 - [ ] Real-time captions via Scribe v2 Realtime

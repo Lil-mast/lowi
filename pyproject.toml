@@ -5,11 +5,10 @@ description = "Meeting intelligence agent"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "alembic",
     "arq",
-    "boto3",
     "elevenlabs",
     "fastapi",
+    "openai",
     "pydantic-settings",
     "python-multipart",
     "sqlalchemy",
@@ -22,6 +21,9 @@ dev = [
     "httpx",
     "pytest",
     "ruff",
+]
+frontend = [
+    "streamlit",
 ]
 
 [tool.uv]
