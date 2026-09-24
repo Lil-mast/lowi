@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
+# MeetingCreate is the request model for creating a meeting.
 class MeetingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     scheduled_at: datetime | None = None
@@ -12,6 +12,7 @@ class MeetingCreate(BaseModel):
     generate_prep: bool = False
 
 
+# ActionItemOut is the response model for an action item.
 class ActionItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

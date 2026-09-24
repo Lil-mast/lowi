@@ -172,6 +172,8 @@ SECRET_KEY=change-me
 
 ## Getting Started (Local)
 
+Full steps, env vars, and URLs: [SETUP.md](SETUP.md).
+
 ```bash
 # 1. Clone & install (uv creates .venv and installs from pyproject.toml)
 uv sync
