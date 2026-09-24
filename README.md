@@ -200,6 +200,8 @@ uv run streamlit run frontend/app.py
 uv run arq app.workers.tasks.WorkerSettings
 ```
 
+Render: two Docker services in [render.yaml](render.yaml). See [SETUP.md](SETUP.md). Use Neon for `DATABASE_URL`.
+
 ---
 
 ## Pipeline Implementation Notes

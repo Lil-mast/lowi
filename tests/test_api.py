@@ -112,6 +112,53 @@ def test_discord_send(client, monkeypatch):
     assert client.get(f"/meetings/{meeting_id}").json()["status"] == "sent"
 
 
+def test_agenda_is_stored_and_sent_to_prep(client):
+    seen = {}
+
+    def fake(model, system, user):
+        seen["user"] = user
+        return {"brief": "Decide the date before the call."}
+
+    client.app.state.runtime.complete_json = fake
+    response = client.post(
+        "/meetings",
+        json={"title": "Launch", "agenda": "Decide the launch date", "generate_prep": True},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["agenda"] == "Decide the launch date"
+    assert body["prep_brief"] == "Decide the date before the call."
+    assert "Decide the launch date" in seen["user"]
+
+
+def test_calendar_unconfigured(client):
+    response = client.get("/calendar/events")
+    assert response.status_code == 200
+    assert response.json() == {"configured": False, "connected": False, "events": []}
+    assert client.get("/calendar/connect").status_code == 400
+
+
+def test_calendar_lists_events(client, monkeypatch):
+    client.app.state.settings.google_client_id = "client-id"
+    client.app.state.settings.google_client_secret = "client-secret"
+
+    def fake_list(settings, now):
+        return [
+            {
+                "id": "evt",
+                "title": "Launch",
+                "start": "2026-09-24T15:00:00Z",
+                "agenda": "Decide the date",
+                "html_link": None,
+            }
+        ]
+
+    monkeypatch.setattr("app.api.routes.calendar.list_upcoming_events", fake_list)
+    body = client.get("/calendar/events").json()
+    assert body["connected"] is True
+    assert body["events"][0]["agenda"] == "Decide the date"
+
+
 def test_empty_upload(client):
     created = client.post("/meetings", json={"title": "Empty"})
     response = client.post(

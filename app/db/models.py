@@ -41,6 +41,7 @@ class Meeting(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="scheduled")
     calendar_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    agenda: Mapped[str | None] = mapped_column(Text, nullable=True)
     prep_brief: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

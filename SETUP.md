@@ -67,6 +67,17 @@ Streamlit reads `LOWI_API_URL` when the API is not on port 8000. The orange them
 uv run pytest
 ```
 
+## Render
+
+`render.yaml` defines two Docker web services from the same image. Render gives each service one `PORT`, so the API and Streamlit cannot share a process.
+
+1. Create a Neon database and copy its connection string. The Render disk is ephemeral, so do not use SQLite there.
+2. In Google Cloud, create an OAuth client and add the public API callback, `https://<lowi-api host>/calendar/callback`.
+3. Connect the GitHub repo in Render and apply the blueprint. Fill the secret env vars. Set `LOWI_API_URL` on `lowi-ui` to the public API URL, and `GOOGLE_REDIRECT_URI` on `lowi-api` to that same host plus `/calendar/callback`.
+4. Connect Calendar once locally (or on the API host). Copy `refresh_token` from `data/google_token.json` into `GOOGLE_REFRESH_TOKEN` so a restart does not drop the connection.
+
+Health check for the API is `GET /health`.
+
 ## Optional worker
 
 Redis plus ARQ runs the same pipeline outside the API process. Skip this for local use.

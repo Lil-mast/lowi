@@ -1,6 +1,7 @@
 """Streamlit UI. Calls the FastAPI backend; no business logic here."""
 
 import os
+from pathlib import Path
 
 import httpx
 import streamlit as st
@@ -26,7 +27,14 @@ def request(method: str, path: str, **kwargs) -> httpx.Response:
     return http_client().request(method, path, **kwargs)
 
 
-st.set_page_config(page_title="LoWi", page_icon=":material/graphic_eq:", layout="centered")
+logo = Path(__file__).parent / "bot.png"
+st.set_page_config(
+    page_title="LoWi",
+    page_icon=str(logo) if logo.exists() else ":material/graphic_eq:",
+    layout="centered",
+)
+if logo.exists():
+    st.logo(str(logo))
 st.title("LoWi", help="Meeting notes")
 st.caption(f"API {API_URL}")
 
@@ -54,10 +62,58 @@ with st.sidebar:
     else:
         st.caption("No meetings yet.")
 
+calendar = request("GET", "/calendar/events")
+with st.container(border=True):
+    st.subheader("Upcoming on Google Calendar")
+    if calendar.is_error:
+        st.error(calendar.text)
+    else:
+        body = calendar.json()
+        if not body["configured"]:
+            st.caption("Add Google OAuth credentials on the API to list upcoming events.")
+        elif not body["connected"]:
+            st.link_button(
+                "Connect Google Calendar",
+                f"{API_URL}/calendar/connect",
+                icon=":material/calendar_month:",
+            )
+        elif not body["events"]:
+            st.caption("No upcoming events.")
+        else:
+            for event in body["events"]:
+                when = event.get("start") or "unscheduled"
+                st.markdown(f"**{event['title']}** · {when}")
+                if event.get("agenda"):
+                    st.caption(event["agenda"])
+                if st.button(
+                    "Prep this meeting",
+                    key=f"cal-{event['id']}",
+                    icon=":material/event:",
+                ):
+                    payload = {
+                        "title": event["title"],
+                        "calendar_event_id": event["id"],
+                        "agenda": event.get("agenda") or None,
+                        "generate_prep": True,
+                    }
+                    start = event.get("start") or ""
+                    if "T" in start:
+                        payload["scheduled_at"] = start
+                    response = request("POST", "/meetings", json=payload)
+                    if response.is_error:
+                        st.error(response.text)
+                    else:
+                        st.session_state["meeting_id"] = response.json()["id"]
+                        st.rerun()
+
 with st.container(border=True):
     st.subheader("New meeting")
     with st.form("create-meeting", clear_on_submit=True):
         title = st.text_input("Title")
+        agenda = st.text_area(
+            "Agenda",
+            placeholder="What should the brief prepare you for?",
+        )
         generate_prep = st.checkbox("Generate prep brief", value=True)
         submitted = st.form_submit_button("Create", icon=":material/add:", type="primary")
     if submitted:
@@ -67,7 +123,11 @@ with st.container(border=True):
             response = request(
                 "POST",
                 "/meetings",
-                json={"title": title.strip(), "generate_prep": generate_prep},
+                json={
+                    "title": title.strip(),
+                    "agenda": agenda.strip() or None,
+                    "generate_prep": generate_prep,
+                },
             )
             if response.is_error:
                 st.error(response.text)
@@ -99,6 +159,8 @@ detail = detail_response.json()
 
 st.header(detail["title"])
 st.badge(detail["status"], color=STATUS_COLOR.get(detail["status"], "gray"))
+if detail.get("agenda"):
+    st.markdown(detail["agenda"])
 if detail.get("error"):
     st.error(detail["error"])
 

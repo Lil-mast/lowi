@@ -24,7 +24,8 @@ Read [docs/features.md](../../../docs/features.md) before editing a feature.
 |---|---|---|
 | Health and index | `app/api/routes/health.py` | `GET /`, `GET /health` |
 | Meetings | `app/api/routes/meetings.py` | `POST/GET /meetings`, `GET /meetings/{id}` |
-| Prep | `app/services/prep.py` | `generate_prep` on create |
+| Prep | `app/services/prep.py` | `generate_prep` on create; agenda is included |
+| Calendar | `app/services/calendar.py` | `GET /calendar/connect`, `/calendar/callback`, `/calendar/events` |
 | Audio | `app/services/storage.py` | `POST /meetings/{id}/upload` |
 | Transcription | `app/services/transcription.py` | `GET /meetings/{id}/transcript` |
 | Summary | `app/services/summarizer.py` | `POST /meetings/{id}/summarize`, `GET /action-items` |

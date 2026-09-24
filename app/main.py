@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import health, meetings, transcripts
+from app.api.routes import calendar, health, meetings, transcripts
 from app.config import Settings, get_settings
 from app.db.session import configure_engine, init_db
 from app.services.runtime import build_runtime
@@ -24,6 +24,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="LoWi", lifespan=lifespan)
     app.state.settings = settings or get_settings()
     app.include_router(health.router)
+    app.include_router(calendar.router)
     app.include_router(meetings.router)
     app.include_router(transcripts.router)
     return app

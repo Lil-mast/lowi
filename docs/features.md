@@ -18,7 +18,7 @@ Code: [app/api/routes/meetings.py](../app/api/routes/meetings.py), [app/db/model
 
 ## Prep brief
 
-`POST /meetings` with `"generate_prep": true` asks AgentRouter (`AGENTROUTER_PREP_MODEL`, default `deepseek-v4-flash`) for a short brief. Context is recent meetings and open action items. The text is stored on `meetings.prep_brief`.
+`POST /meetings` with `"generate_prep": true` asks AgentRouter (`AGENTROUTER_PREP_MODEL`, default `deepseek-v4-flash`) for a short brief. Context is the agenda you typed, recent meetings, and open action items. The text is stored on `meetings.prep_brief`. The agenda itself is stored even when prep is off.
 
 Code: [app/services/prep.py](../app/services/prep.py)
 
@@ -57,6 +57,14 @@ Upload schedules `run_pipeline`: transcribe, summarize, then Discord if a webhoo
 The API uses FastAPI `BackgroundTasks`. [app/workers/tasks.py](../app/workers/tasks.py) is the same function behind ARQ if you later run a Redis worker.
 
 Code: [app/services/pipeline.py](../app/services/pipeline.py)
+
+## Google Calendar
+
+Read-only. `GET /calendar/connect` starts OAuth. `GET /calendar/callback` stores the token under `DATA_DIR`. `GET /calendar/events` returns the next ten primary-calendar events, or `{configured, connected, events}` when Google is not set up yet. "Prep this meeting" in the UI creates a LoWi meeting from the event title, time, and description (used as the agenda).
+
+Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI`. On Render, also set `GOOGLE_REFRESH_TOKEN` so the connection survives a restart.
+
+Code: [app/services/calendar.py](../app/services/calendar.py), [app/api/routes/calendar.py](../app/api/routes/calendar.py)
 
 ## Streamlit
 

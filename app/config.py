@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     default_user_email: str = "local@lowi.local"
     default_user_name: str = "Local"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://127.0.0.1:8000/calendar/callback"
+    google_refresh_token: str = ""
 
 
 @lru_cache

@@ -14,7 +14,12 @@ PREP_SYSTEM = (
 )
 
 
-def build_prep_context(db: Session, user_id: str, title: str) -> str:
+def build_prep_context(
+    db: Session,
+    user_id: str,
+    title: str,
+    agenda: str | None = None,
+) -> str:
     meetings = db.scalars(
         select(Meeting)
         .where(Meeting.user_id == user_id)
@@ -22,6 +27,8 @@ def build_prep_context(db: Session, user_id: str, title: str) -> str:
         .limit(8)
     ).all()
     lines = [f"Upcoming meeting: {title}"]
+    if agenda and agenda.strip():
+        lines.append(f"Agenda:\n{agenda.strip()}")
     for meeting in meetings:
         summary = db.scalar(
             select(Summary)

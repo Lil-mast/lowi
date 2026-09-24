@@ -67,6 +67,7 @@ def create_meeting(
         title=body.title,
         scheduled_at=body.scheduled_at,
         calendar_event_id=body.calendar_event_id,
+        agenda=body.agenda,
         status="scheduled",
     )
     db.add(meeting)
@@ -74,7 +75,7 @@ def create_meeting(
     db.refresh(meeting)
     if body.generate_prep:
         try:
-            context = build_prep_context(db, user.id, body.title)
+            context = build_prep_context(db, user.id, body.title, body.agenda)
             meeting.prep_brief = generate_prep(
                 settings, context, request.app.state.runtime.complete_json
             )

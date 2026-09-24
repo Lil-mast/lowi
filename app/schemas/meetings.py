@@ -4,11 +4,13 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 # MeetingCreate is the request model for creating a meeting.
 class MeetingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     scheduled_at: datetime | None = None
     calendar_event_id: str | None = None
+    agenda: str | None = Field(default=None, max_length=8000)
     generate_prep: bool = False
 
 
@@ -49,11 +51,13 @@ class MeetingOut(BaseModel):
     scheduled_at: datetime | None
     status: str
     calendar_event_id: str | None
+    agenda: str | None
     prep_brief: str | None
     error: str | None
     created_at: datetime
 
 
+# MeetingDetail is the response model for a meeting with its transcript, summary, and action items.
 class MeetingDetail(MeetingOut):
     transcript: TranscriptOut | None = None
     summary: SummaryOut | None = None

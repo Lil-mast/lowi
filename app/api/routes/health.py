@@ -18,6 +18,7 @@ def index() -> str:
     <li><a href="/docs">API docs</a></li>
     <li><a href="/health">Health</a></li>
     <li><a href="/meetings">Meetings</a></li>
+    <li><a href="/calendar/events">Calendar</a></li>
     <li><a href="/action-items">Open action items</a></li>
   </ul>
 </body>
