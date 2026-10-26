@@ -1,14 +1,17 @@
-"""Engine, sessions, and startup schema creation."""
+"""Engine, sessions, migrations, and startup seed data."""
+
+from __future__ import annotations
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import Settings, normalize_database_url
-from app.db.models import Base, User
+from app.db.migrate import run_migrations
+from app.db.models import User
 
 SessionLocal = sessionmaker(autoflush=False, autocommit=False, expire_on_commit=False)
 engine: Engine | None = None
@@ -39,24 +42,18 @@ def get_db() -> Iterator[Session]:
         db.close()
 
 
-def _ensure_agenda_column() -> None:
-    """Add agenda on databases created before that column existed."""
-    if engine is None or not inspect(engine).has_table("meetings"):
-        return
-    columns = {column["name"] for column in inspect(engine).get_columns("meetings")}
-    if "agenda" in columns:
-        return
-    with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE meetings ADD COLUMN agenda TEXT"))
-
-
-def seed_default_user(session: Session, settings: Settings) -> User:
-    user = session.scalar(select(User).where(User.email == settings.default_user_email))
+def seed_user(db: Session, email: str, name: str) -> User:
+    """Return the user for `email`, creating it if needed."""
+    user = db.scalar(select(User).where(User.email == email))
     if user is None:
-        user = User(email=settings.default_user_email, name=settings.default_user_name)
-        session.add(user)
-        session.commit()
-        session.refresh(user)
+        user = User(email=email, name=name)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    elif user.name != name:
+        user.name = name
+        db.commit()
+        db.refresh(user)
     return user
 
 
@@ -64,7 +61,10 @@ def init_db(settings: Settings) -> None:
     if engine is None:
         configure_engine(settings.database_url)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    Base.metadata.create_all(engine)
-    _ensure_agenda_column()
-    with SessionLocal() as session:
-        seed_default_user(session, settings)
+    run_migrations(engine)
+    if settings.auth_mode in {"dev", "test"}:
+        with SessionLocal() as session:
+            if settings.auth_mode == "test":
+                seed_user(session, settings.test_user_email, settings.test_user_name)
+            else:
+                seed_user(session, settings.default_user_email, settings.default_user_name)

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "arq",
+    "email-validator",
     "elevenlabs",
     "fastapi",
     "google-api-python-client>=2.200.0",
@@ -15,19 +16,24 @@ dependencies = [
     "openai",
     "psycopg[binary]>=3.3.6",
     "pydantic-settings",
+    "pyjwt[crypto]",
     "python-multipart",
     "sqlalchemy",
     "uvicorn[standard]",
     "weasyprint",
+    "boto3>=1.43.118",
 ]
 
 [dependency-groups]
 dev = [
     "httpx",
     "pytest",
+    "pytest-asyncio",
+    "respx",
     "ruff",
 ]
 frontend = [
+    "extra-streamlit-components",
     "streamlit",
 ]
 

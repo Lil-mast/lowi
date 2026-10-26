@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.api.deps import get_settings
+from app.api.deps import get_current_user, get_settings
 from app.config import Settings
+from app.db.models import User
 from app.services.calendar import (
     CalendarNotConfigured,
     CalendarNotConnected,
@@ -41,7 +42,10 @@ def callback(
 
 
 @router.get("/calendar/events")
-def events(settings: Settings = Depends(get_settings)) -> dict:
+def events(
+    settings: Settings = Depends(get_settings),
+    user: User = Depends(get_current_user),
+) -> dict:
     if not google_configured(settings):
         return {"configured": False, "connected": False, "events": []}
     try:

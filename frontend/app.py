@@ -1,12 +1,20 @@
 """Streamlit UI. Calls the FastAPI backend; no business logic here."""
 
+from __future__ import annotations
+
 import os
+import secrets
+from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 
 import httpx
 import streamlit as st
+from extra_streamlit_components import CookieManager
+from live import render_live_capture
 
 API_URL = os.environ.get("LOWI_API_URL", "http://127.0.0.1:8000").rstrip("/")
+COOKIE_NAME = "lowi_session"
 
 STATUS_COLOR = {
     "scheduled": "gray",
@@ -23,8 +31,111 @@ def http_client() -> httpx.Client:
     return httpx.Client(base_url=API_URL, timeout=120)
 
 
-def request(method: str, path: str, **kwargs) -> httpx.Response:
-    return http_client().request(method, path, **kwargs)
+def cookie_manager() -> CookieManager:
+    return CookieManager(key="lowi_cookies")
+
+
+def request(method: str, path: str, *, auth_required: bool = True, **kwargs) -> httpx.Response:
+    token = st.session_state.get("token")
+    if auth_required and token:
+        headers = dict(kwargs.pop("headers", {}))
+        headers["Authorization"] = f"Bearer {token}"
+        kwargs["headers"] = headers
+    response = http_client().request(method, path, **kwargs)
+    if auth_required and response.status_code == 401:
+        clear_session()
+        st.rerun()
+    return response
+
+
+def error_text(response: httpx.Response) -> str:
+    try:
+        detail = response.json().get("detail", response.text)
+    except ValueError:
+        return response.text
+    if isinstance(detail, list):
+        return "; ".join(str(item.get("msg", item)) for item in detail)
+    return str(detail)
+
+
+def store_session(body: dict) -> None:
+    st.session_state["token"] = body["token"]
+    st.session_state["user"] = body["user"]
+    expires_at = body.get("expires_at")
+    if expires_at:
+        with suppress(Exception):
+            parsed = datetime.fromisoformat(expires_at)
+            cookie_manager().set(
+                COOKIE_NAME,
+                body["token"],
+                expires_at=parsed,
+                secure=API_URL.startswith("https://"),
+            )
+    st.rerun()
+
+
+def clear_session() -> None:
+    st.session_state.pop("token", None)
+    st.session_state.pop("user", None)
+    st.session_state.pop("pdf_bytes", None)
+    with suppress(Exception):
+        cookie_manager().delete(COOKIE_NAME)
+
+
+def login_screen() -> None:
+    st.subheader("Sign in")
+    sign_in, create = st.tabs(["Sign in", "Create account"])
+
+    with sign_in:
+        with st.form("sign-in"):
+            email = st.text_input("Email", key="login-email")
+            password = st.text_input("Password", type="password", key="login-password")
+            submitted = st.form_submit_button(
+                "Sign in", icon=":material/login:", type="primary"
+            )
+        if submitted:
+            response = request(
+                "POST",
+                "/auth/login",
+                auth_required=False,
+                json={"email": email.strip(), "password": password},
+            )
+            if response.is_error:
+                st.error(error_text(response))
+            else:
+                store_session(response.json())
+
+    with create:
+        with st.form("create-account"):
+            name = st.text_input("Name", key="register-name")
+            email = st.text_input("Email", key="register-email")
+            password = st.text_input(
+                "Password",
+                type="password",
+                key="register-password",
+                help="At least 8 characters.",
+            )
+            submitted = st.form_submit_button(
+                "Create account", icon=":material/person_add:", type="primary"
+            )
+        if submitted:
+            if not name.strip():
+                st.warning("Add your name first.")
+            else:
+                response = request(
+                    "POST",
+                    "/auth/register",
+                    auth_required=False,
+                    json={
+                        "email": email.strip(),
+                        "password": password,
+                        "name": name.strip(),
+                    },
+                )
+                if response.is_error:
+                    st.error(error_text(response))
+                else:
+                    store_session(response.json())
 
 
 logo = Path(__file__).parent / "bot.png"
@@ -39,14 +150,108 @@ st.title("LoWi", help="Meeting notes")
 st.caption(f"API {API_URL}")
 
 try:
-    health = request("GET", "/health")
+    health = request("GET", "/health", auth_required=False)
     health.raise_for_status()
 except httpx.HTTPError as exc:
     st.error(f"API is not reachable at {API_URL}. Start it with `uv run uvicorn app.main:app --reload`.")
     st.caption(str(exc))
     st.stop()
 
+config_response = request("GET", "/auth/config", auth_required=False)
+auth_config = config_response.json() if config_response.is_success else {"required": False}
+auth_required = bool(auth_config.get("required"))
+
+user = st.session_state.get("user")
+if auth_required:
+    token = st.session_state.get("token")
+    if not token:
+        try:
+            token = cookie_manager().get(COOKIE_NAME)
+        except Exception:  # noqa: BLE001 - cookie persistence is best effort
+            token = None
+        if token:
+            st.session_state["token"] = token
+
+    if not st.session_state.get("token"):
+        login_screen()
+        st.stop()
+
+    me = request("GET", "/auth/me")
+    if me.is_error:
+        clear_session()
+        st.rerun()
+    user = me.json()
+    st.session_state["user"] = user
+
+
+if st.session_state.get("live_mode"):
+    live_meeting_id = st.session_state.get("live_meeting_id")
+    if not live_meeting_id:
+        st.session_state["live_mode"] = False
+        st.rerun()
+
+    live_detail_response = request("GET", f"/meetings/{live_meeting_id}")
+    if live_detail_response.is_error:
+        st.error(error_text(live_detail_response))
+        if st.button("Back to meetings", icon=":material/arrow_back:"):
+            st.session_state["live_mode"] = False
+            st.rerun()
+        st.stop()
+
+    live_detail = live_detail_response.json()
+    with st.container(horizontal=True):
+        if st.button("Back to meeting", icon=":material/arrow_back:"):
+            st.session_state["live_mode"] = False
+            st.session_state.pop("live_meeting_id", None)
+            st.rerun()
+        st.subheader(f"Live · {live_detail['title']}")
+    st.caption(
+        "Audio goes from this browser to the API, then to ElevenLabs. The API key never reaches the browser."
+    )
+
+    ticket_response = request("POST", f"/meetings/{live_meeting_id}/live/ticket")
+    if ticket_response.is_error:
+        st.error(error_text(ticket_response))
+        st.stop()
+
+    ticket = ticket_response.json()
+    live_result = render_live_capture(
+        ws_url=ticket["ws_url"],
+        initial_transcript=st.session_state.get("live_last_transcript", ""),
+        key=f"live-{live_meeting_id}-{st.session_state.get('live_nonce', '0')}",
+    )
+
+    stopped = getattr(live_result, "stopped", None) if live_result is not None else None
+    if stopped:
+        transcript = (stopped.get("transcript") or "").strip()
+        st.session_state["live_last_transcript"] = transcript
+        if stopped.get("failed"):
+            st.warning(
+                "The live connection ended with an error. Any audio that reached the server was saved."
+            )
+        else:
+            st.success(
+                "Recording saved. Batch diarization and the summary are queued; go back to the meeting to watch the status."
+            )
+        if transcript:
+            with st.expander("Live transcript", expanded=True):
+                st.write(transcript)
+    else:
+        st.info(
+            "The ticket is valid for 15 minutes. If it expires before you start, reload this view."
+        )
+    st.stop()
+
+
 with st.sidebar:
+    if auth_required and user:
+        st.caption(f"Signed in as {user['name']}")
+        st.caption(user["email"])
+        if st.button("Sign out", icon=":material/logout:"):
+            request("POST", "/auth/logout")
+            clear_session()
+            st.rerun()
+
     st.header("Meetings")
     listed = request("GET", "/meetings")
     meetings = listed.json() if listed.is_success else []
@@ -66,7 +271,7 @@ calendar = request("GET", "/calendar/events")
 with st.container(border=True):
     st.subheader("Upcoming on Google Calendar")
     if calendar.is_error:
-        st.error(calendar.text)
+        st.error(error_text(calendar))
     else:
         body = calendar.json()
         if not body["configured"]:
@@ -101,7 +306,7 @@ with st.container(border=True):
                         payload["scheduled_at"] = start
                     response = request("POST", "/meetings", json=payload)
                     if response.is_error:
-                        st.error(response.text)
+                        st.error(error_text(response))
                     else:
                         st.session_state["meeting_id"] = response.json()["id"]
                         st.rerun()
@@ -130,7 +335,7 @@ with st.container(border=True):
                 },
             )
             if response.is_error:
-                st.error(response.text)
+                st.error(error_text(response))
             else:
                 st.session_state["meeting_id"] = response.json()["id"]
                 st.rerun()
@@ -153,7 +358,7 @@ if not meeting_id:
 
 detail_response = request("GET", f"/meetings/{meeting_id}")
 if detail_response.is_error:
-    st.error(detail_response.text)
+    st.error(error_text(detail_response))
     st.stop()
 detail = detail_response.json()
 
@@ -171,6 +376,16 @@ if detail.get("prep_brief"):
 
 with st.container(border=True):
     st.subheader("Audio", divider="gray")
+    if st.button("Record live", icon=":material/mic:"):
+        st.session_state["live_mode"] = True
+        st.session_state["live_meeting_id"] = meeting_id
+        st.session_state["live_nonce"] = secrets.token_hex(4)
+        st.session_state["live_last_transcript"] = ""
+        st.rerun()
+    st.caption(
+        "Use the microphone or share a meeting tab with audio. The live transcript appears here; "
+        "speaker labels and the summary are produced after you stop."
+    )
     audio = st.file_uploader(
         "Audio file",
         type=["mp3", "wav", "m4a", "mp4", "webm", "ogg"],
@@ -183,7 +398,7 @@ with st.container(border=True):
             files={"file": (audio.name, audio.getvalue(), audio.type or "application/octet-stream")},
         )
         if response.is_error:
-            st.error(response.text)
+            st.error(error_text(response))
         else:
             st.rerun()
 
@@ -212,13 +427,13 @@ with st.container(horizontal=True):
     if st.button("Download PDF", icon=":material/picture_as_pdf:", disabled=not has_summary):
         response = request("GET", f"/meetings/{meeting_id}/pdf")
         if response.is_error:
-            st.error(response.text)
+            st.error(error_text(response))
         else:
             st.session_state["pdf_bytes"] = response.content
     if st.button("Send to Discord", icon=":material/send:", disabled=not has_summary):
         response = request("POST", f"/meetings/{meeting_id}/send-discord")
         if response.is_error:
-            st.error(response.text)
+            st.error(error_text(response))
         else:
             st.success("Sent to Discord.")
             st.rerun()

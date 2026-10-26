@@ -1,7 +1,7 @@
 from app.config import Settings, normalize_database_url
 from app.services.calendar import event_to_item
 from app.services.prep import generate_prep
-from app.services.summarizer import summarize_transcript
+from app.services.summarizer import SUMMARY_CHUNK_CHARS, summarize_transcript
 
 
 def test_normalize_postgres_url():
@@ -45,3 +45,26 @@ def test_summarize_rejects_incomplete_payload():
         assert "decisions" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_summarize_chunks_a_long_transcript():
+    settings = Settings(_env_file=None)
+    calls: list[str] = []
+
+    summary = {
+        "decisions": ["Ship"],
+        "action_items": [],
+        "open_questions": [],
+        "key_points": ["Launch"],
+        "narrative": "Merged notes.",
+    }
+
+    def complete(model, system, user):
+        calls.append(system)
+        return summary
+
+    transcript = ("word " * (SUMMARY_CHUNK_CHARS // 5 + 100)).strip()
+    result = summarize_transcript(settings, "Long meeting", transcript, complete)
+    assert result["narrative"] == "Merged notes."
+    assert len(calls) >= 3
+    assert "one part" in calls[0]
