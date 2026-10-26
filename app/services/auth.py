@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -53,6 +54,7 @@ class NeonAuthProvider:
         self.settings = settings
         self._client = client or httpx.Client(timeout=20)
         self._jwks: PyJWKClient | None = None
+        self._origin = _origin(settings.ui_base_url)
 
     def _url(self, path: str) -> str:
         base = self.settings.neon_auth_base_url.rstrip("/")
@@ -62,7 +64,11 @@ class NeonAuthProvider:
 
     def _request(self, path: str, payload: dict) -> dict:
         try:
-            response = self._client.post(self._url(path), json=payload)
+            response = self._client.post(
+                self._url(path),
+                json=payload,
+                headers={"Origin": self._origin},
+            )
         except httpx.HTTPError as exc:
             logger.warning("Neon Auth request failed: %s", exc)
             raise AuthError("Authentication service is unavailable", 502) from exc
@@ -70,7 +76,15 @@ class NeonAuthProvider:
         if response.status_code >= 400:
             message = _error_message(response)
             logger.info("Neon Auth rejected %s: %s", path, message)
-            raise AuthError(message, 401 if response.status_code in {400, 401, 403} else 502)
+            if response.status_code >= 500:
+                status_code = 502
+            elif "already exists" in message.lower():
+                status_code = 409
+            elif response.status_code in {400, 401, 403}:
+                status_code = 401
+            else:
+                status_code = 400
+            raise AuthError(message, status_code)
 
         try:
             body = response.json()
@@ -102,12 +116,12 @@ class NeonAuthProvider:
         except Exception as exc:
             raise AuthError("Invalid token", 401) from exc
 
-        options = {"require": ["exp", "sub"]}
-        kwargs: dict = {"algorithms": ["EdDSA", "RS256", "ES256"]}
-        if self.settings.neon_auth_issuer:
-            kwargs["issuer"] = self.settings.neon_auth_issuer
-        if self.settings.neon_auth_audience:
-            kwargs["audience"] = self.settings.neon_auth_audience
+        options = {"require": ["exp", "sub", "iss", "aud"]}
+        kwargs: dict = {
+            "algorithms": ["EdDSA", "RS256", "ES256"],
+            "issuer": self.settings.neon_auth_issuer or _origin(self.settings.neon_auth_base_url),
+            "audience": self.settings.neon_auth_audience or _origin(self.settings.neon_auth_base_url),
+        }
 
         try:
             claims = jwt.decode(token, signing_key.key, options=options, **kwargs)
@@ -123,6 +137,13 @@ class NeonAuthProvider:
             name=str(claims.get("name") or email.split("@")[0]),
             email_verified=bool(claims.get("emailVerified", True)),
         )
+
+
+def _origin(url: str) -> str:
+    parsed = urlsplit(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url.rstrip("/")
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _identity_from_body(body: dict) -> AuthIdentity:

@@ -107,6 +107,10 @@ class Transcript(Base):
     raw_text: Mapped[str] = mapped_column(Text, default="")
     diarized_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="upload")
+    live_session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     meeting: Mapped[Meeting] = relationship(back_populates="transcripts")
@@ -119,6 +123,10 @@ class Summary(Base):
     meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id"))
     structured_json: Mapped[dict] = mapped_column(JSON)
     narrative: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    input_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     meeting: Mapped[Meeting] = relationship(back_populates="summaries")
@@ -133,9 +141,45 @@ class ActionItem(Base):
     owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="open")
+    source_summary_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    stable_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     meeting: Mapped[Meeting] = relationship(back_populates="action_items")
+
+
+class LiveSession(Base):
+    """A browser capture session streamed through the API."""
+
+    __tablename__ = "live_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="recording")
+    source: Mapped[str] = mapped_column(String(32), default="mic")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LiveSegment(Base):
+    __tablename__ = "live_segments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    live_session_id: Mapped[str] = mapped_column(ForeignKey("live_sessions.id"), index=True)
+    meeting_id: Mapped[str] = mapped_column(ForeignKey("meetings.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    is_final: Mapped[bool] = mapped_column(default=True)
+    start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class PipelineRun(Base):

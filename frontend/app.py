@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 import httpx
 import streamlit as st
 from extra_streamlit_components import CookieManager
+from live import render_live_capture
 
 API_URL = os.environ.get("LOWI_API_URL", "http://127.0.0.1:8000").rstrip("/")
 COOKIE_NAME = "lowi_session"
@@ -29,7 +31,6 @@ def http_client() -> httpx.Client:
     return httpx.Client(base_url=API_URL, timeout=120)
 
 
-@st.cache_resource
 def cookie_manager() -> CookieManager:
     return CookieManager(key="lowi_cookies")
 
@@ -64,7 +65,12 @@ def store_session(body: dict) -> None:
     if expires_at:
         with suppress(Exception):
             parsed = datetime.fromisoformat(expires_at)
-            cookie_manager().set(COOKIE_NAME, body["token"], expires_at=parsed)
+            cookie_manager().set(
+                COOKIE_NAME,
+                body["token"],
+                expires_at=parsed,
+                secure=API_URL.startswith("https://"),
+            )
     st.rerun()
 
 
@@ -176,6 +182,65 @@ if auth_required:
         st.rerun()
     user = me.json()
     st.session_state["user"] = user
+
+
+if st.session_state.get("live_mode"):
+    live_meeting_id = st.session_state.get("live_meeting_id")
+    if not live_meeting_id:
+        st.session_state["live_mode"] = False
+        st.rerun()
+
+    live_detail_response = request("GET", f"/meetings/{live_meeting_id}")
+    if live_detail_response.is_error:
+        st.error(error_text(live_detail_response))
+        if st.button("Back to meetings", icon=":material/arrow_back:"):
+            st.session_state["live_mode"] = False
+            st.rerun()
+        st.stop()
+
+    live_detail = live_detail_response.json()
+    with st.container(horizontal=True):
+        if st.button("Back to meeting", icon=":material/arrow_back:"):
+            st.session_state["live_mode"] = False
+            st.session_state.pop("live_meeting_id", None)
+            st.rerun()
+        st.subheader(f"Live · {live_detail['title']}")
+    st.caption(
+        "Audio goes from this browser to the API, then to ElevenLabs. The API key never reaches the browser."
+    )
+
+    ticket_response = request("POST", f"/meetings/{live_meeting_id}/live/ticket")
+    if ticket_response.is_error:
+        st.error(error_text(ticket_response))
+        st.stop()
+
+    ticket = ticket_response.json()
+    live_result = render_live_capture(
+        ws_url=ticket["ws_url"],
+        initial_transcript=st.session_state.get("live_last_transcript", ""),
+        key=f"live-{live_meeting_id}-{st.session_state.get('live_nonce', '0')}",
+    )
+
+    stopped = getattr(live_result, "stopped", None) if live_result is not None else None
+    if stopped:
+        transcript = (stopped.get("transcript") or "").strip()
+        st.session_state["live_last_transcript"] = transcript
+        if stopped.get("failed"):
+            st.warning(
+                "The live connection ended with an error. Any audio that reached the server was saved."
+            )
+        else:
+            st.success(
+                "Recording saved. Batch diarization and the summary are queued; go back to the meeting to watch the status."
+            )
+        if transcript:
+            with st.expander("Live transcript", expanded=True):
+                st.write(transcript)
+    else:
+        st.info(
+            "The ticket is valid for 15 minutes. If it expires before you start, reload this view."
+        )
+    st.stop()
 
 
 with st.sidebar:
@@ -311,6 +376,16 @@ if detail.get("prep_brief"):
 
 with st.container(border=True):
     st.subheader("Audio", divider="gray")
+    if st.button("Record live", icon=":material/mic:"):
+        st.session_state["live_mode"] = True
+        st.session_state["live_meeting_id"] = meeting_id
+        st.session_state["live_nonce"] = secrets.token_hex(4)
+        st.session_state["live_last_transcript"] = ""
+        st.rerun()
+    st.caption(
+        "Use the microphone or share a meeting tab with audio. The live transcript appears here; "
+        "speaker labels and the summary are produced after you stop."
+    )
     audio = st.file_uploader(
         "Audio file",
         type=["mp3", "wav", "m4a", "mp4", "webm", "ogg"],

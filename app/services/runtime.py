@@ -8,6 +8,7 @@ from app.config import Settings
 from app.services.auth import AuthProvider, build_auth_provider
 from app.services.jobs import InlineJobQueue, JobQueue
 from app.services.llm import CompleteJson, build_complete_json
+from app.services.realtime import RealtimeClient, build_realtime
 from app.services.storage import Storage, build_storage
 
 
@@ -18,18 +19,20 @@ class Runtime:
     auth: AuthProvider | None
     storage: Storage
     queue: JobQueue | None
+    realtime: RealtimeClient
 
 
 def build_runtime(settings: Settings) -> Runtime:
     complete_json = build_complete_json(settings)
     storage = build_storage(settings)
-    queue: JobQueue | None = None
-    if settings.job_backend == "inline":
-        queue = InlineJobQueue(settings, complete_json, storage)
-    return Runtime(
+    runtime = Runtime(
         settings=settings,
         complete_json=complete_json,
         auth=build_auth_provider(settings),
         storage=storage,
-        queue=queue,
+        queue=None,
+        realtime=build_realtime(settings),
     )
+    if settings.job_backend == "inline":
+        runtime.queue = InlineJobQueue(settings, lambda: runtime.complete_json, storage)
+    return runtime

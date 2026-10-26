@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
-from app.db.models import Meeting, PipelineRun, Recording, Transcript
+from app.db.models import LiveSession, Meeting, PipelineRun, Recording, Transcript
 from app.services.discord import send_summary
 from app.services.llm import CompleteJson
 from app.services.storage import Storage
@@ -66,7 +66,7 @@ def run_pipeline(
 
         try:
             payload = _transcribe(settings, storage, recording)
-            _save_transcript(db, meeting, payload)
+            _save_transcript(db, meeting, recording, payload)
             transcript = latest_transcript(db, meeting.id)
             if transcript is None:
                 raise RuntimeError("Transcript was not stored")
@@ -78,6 +78,7 @@ def run_pipeline(
             )
             summary = store_summary(db, meeting, structured)
             meeting.status = "summarized"
+            _finish_live_session(db, meeting_id, "completed", None, None)
             db.commit()
             db.refresh(summary)
             if settings.discord_webhook_url:
@@ -93,6 +94,7 @@ def run_pipeline(
                 failed.error = "Processing failed. Check the server logs for details."
                 failed.error_code = "pipeline_failed"
                 failed.error_message = str(exc)[:1000]
+                _finish_live_session(db, meeting_id, "failed", "pipeline_failed", str(exc)[:1000])
                 db.commit()
             _finish_run(db, run, "failed", "pipeline_failed", str(exc)[:1000], started)
     finally:
@@ -124,16 +126,41 @@ def _finish_run(
     db.commit()
 
 
-def _save_transcript(db: Session, meeting: Meeting, payload: TranscriptPayload) -> None:
+def _save_transcript(
+    db: Session,
+    meeting: Meeting,
+    recording: Recording,
+    payload: TranscriptPayload,
+) -> None:
     db.add(
         Transcript(
             meeting_id=meeting.id,
             raw_text=payload.raw_text,
             diarized_json=payload.diarized_json,
             language=payload.language,
-            source="upload",
+            source="live_batch" if recording.source == "live" else "upload",
             word_count=len(payload.raw_text.split()),
         )
     )
     meeting.status = "transcribed"
     db.commit()
+
+
+def _finish_live_session(
+    db: Session,
+    meeting_id: str,
+    status: str,
+    error_code: str | None,
+    error_message: str | None,
+) -> None:
+    live_session = db.scalar(
+        select(LiveSession)
+        .where(LiveSession.meeting_id == meeting_id, LiveSession.status == "finalizing")
+        .order_by(LiveSession.created_at.desc())
+    )
+    if live_session is None:
+        return
+    live_session.status = status
+    live_session.ended_at = datetime.now(UTC)
+    live_session.error_code = error_code
+    live_session.error_message = error_message

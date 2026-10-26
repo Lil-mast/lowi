@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 
 from app.config import get_settings
-from app.db.models import Meeting, User
+from app.db.models import LiveSession, Meeting, User
 from app.db.session import SessionLocal, configure_engine, init_db
 from sqlalchemy import func, select, update
 
@@ -48,6 +48,11 @@ def main() -> int:
 
         db.execute(
             update(Meeting).where(Meeting.user_id == legacy.id).values(user_id=target.id)
+        )
+        db.execute(
+            update(LiveSession)
+            .where(LiveSession.user_id == legacy.id)
+            .values(user_id=target.id)
         )
         if not target.discord_webhook_url and legacy.discord_webhook_url:
             target.discord_webhook_url = legacy.discord_webhook_url

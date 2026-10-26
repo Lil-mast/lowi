@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import auth, calendar, health, meetings, transcripts
+from app.api.routes import auth, calendar, health, live, meetings, transcripts
 from app.config import Settings, get_settings, validate_settings
 from app.db.session import configure_engine, init_db
 from app.services.jobs import ArqJobQueue, build_arq_queue
@@ -44,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(calendar.router)
+    app.include_router(live.router)
     app.include_router(meetings.router)
     app.include_router(transcripts.router)
     return app

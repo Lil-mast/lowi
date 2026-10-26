@@ -130,11 +130,11 @@ class S3Storage:
     def put(self, key: str, data: BinaryIO, content_type: str) -> StoredObject:
         reader = _HashingReader(data)
         try:
-            self.client.upload_fileobj(
-                reader,
-                self.bucket,
-                key,
-                ExtraArgs={"ContentType": content_type},
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=reader,
+                ContentType=content_type,
             )
         except Exception as exc:
             raise StorageError("Could not upload object") from exc
@@ -165,8 +165,12 @@ class S3Storage:
     @contextmanager
     def materialize(self, key: str) -> Iterator[Path]:
         with tempfile.NamedTemporaryFile(delete=False) as handle:
-            self.client.download_fileobj(self.bucket, key, handle)
             path = Path(handle.name)
+            try:
+                self.client.download_fileobj(self.bucket, key, handle)
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
         try:
             yield path
         finally:

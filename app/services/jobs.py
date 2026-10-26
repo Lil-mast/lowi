@@ -7,6 +7,7 @@ the same pipeline in a worker thread so behaviour stays close to production.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from arq import create_pool
@@ -27,6 +28,7 @@ class JobQueue(Protocol):
         *,
         job_id: str,
         max_tries: int = 3,
+        wait: bool = True,
     ) -> str: ...
 
 
@@ -35,10 +37,16 @@ def pipeline_job_id(meeting_id: str, version: int = 1) -> str:
 
 
 class InlineJobQueue:
-    def __init__(self, settings: Settings, complete_json: CompleteJson, storage: Storage) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        complete_json: Callable[[], CompleteJson],
+        storage: Storage,
+    ) -> None:
         self.settings = settings
-        self.complete_json = complete_json
+        self._complete_json = complete_json
         self.storage = storage
+        self._tasks: set[asyncio.Task] = set()
 
     async def enqueue(
         self,
@@ -47,19 +55,24 @@ class InlineJobQueue:
         *,
         job_id: str,
         max_tries: int = 3,
+        wait: bool = True,
     ) -> str:
-        if kind == "pipeline":
-            await asyncio.to_thread(
-                run_pipeline,
-                payload["meeting_id"],
-                SessionLocal,
-                self.settings,
-                self.complete_json,
-                self.storage,
-                bool(payload.get("force", False)),
-            )
-        else:
+        if kind != "pipeline":
             raise ValueError(f"Unsupported inline job kind: {kind}")
+        args = (
+            payload["meeting_id"],
+            SessionLocal,
+            self.settings,
+            self._complete_json(),
+            self.storage,
+            bool(payload.get("force", False)),
+        )
+        if wait:
+            await asyncio.to_thread(run_pipeline, *args)
+        else:
+            task = asyncio.create_task(asyncio.to_thread(run_pipeline, *args))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
         return job_id
 
 
@@ -74,6 +87,7 @@ class ArqJobQueue:
         *,
         job_id: str,
         max_tries: int = 3,
+        wait: bool = True,
     ) -> str:
         await self.pool.enqueue_job(
             kind,

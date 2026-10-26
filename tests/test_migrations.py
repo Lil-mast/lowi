@@ -18,10 +18,16 @@ def test_fresh_database_migrates_and_is_idempotent(tmp_path):
     engine = make_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
 
     applied = run_migrations(engine)
-    assert applied == ["0001_baseline", "0002_auth", "0003_storage", "0004_pipeline"]
+    assert applied == [
+        "0001_baseline",
+        "0002_auth",
+        "0003_storage",
+        "0004_pipeline",
+        "0005_live",
+    ]
 
     tables = set(inspect(engine).get_table_names())
-    assert {"users", "meetings", "sessions", "schema_migrations"} <= tables
+    assert {"users", "meetings", "sessions", "schema_migrations", "live_sessions", "live_segments"} <= tables
 
     columns = {column["name"] for column in inspect(engine).get_columns("users")}
     assert {"neon_auth_user_id", "last_login_at"} <= columns
@@ -42,7 +48,12 @@ def test_existing_schema_is_baselined_without_recreating_tables(tmp_path):
         )
 
     applied = run_migrations(engine)
-    assert applied == ["0002_auth", "0003_storage", "0004_pipeline"]
+    assert applied == [
+        "0002_auth",
+        "0003_storage",
+        "0004_pipeline",
+        "0005_live",
+    ]
 
     tables = set(inspect(engine).get_table_names())
     assert "sessions" in tables

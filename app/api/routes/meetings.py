@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -51,6 +52,7 @@ ALLOWED_AUDIO_EXTENSIONS = {
 }
 
 router = APIRouter(tags=["meetings"])
+logger = logging.getLogger(__name__)
 
 
 def meeting_detail(db: Session, meeting: Meeting) -> MeetingDetail:
@@ -99,7 +101,10 @@ def create_meeting(
             db.commit()
             db.refresh(meeting)
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            logger.exception("Prep generation failed for meeting %s", meeting.id)
+            raise HTTPException(
+                status_code=502, detail="Could not generate the prep brief"
+            ) from exc
     return meeting_detail(db, meeting)
 
 
@@ -178,12 +183,22 @@ async def upload_audio(
     db.commit()
 
     job_id = pipeline_job_id(meeting.id, meeting.pipeline_version)
-    await queue.enqueue(
-        "pipeline",
-        {"meeting_id": meeting.id, "force": True},
-        job_id=job_id,
-        max_tries=3,
-    )
+    try:
+        await queue.enqueue(
+            "pipeline",
+            {"meeting_id": meeting.id, "force": True},
+            job_id=job_id,
+            max_tries=3,
+        )
+    except Exception as exc:
+        logger.exception("Could not queue the pipeline for meeting %s", meeting.id)
+        meeting.status = "failed"
+        meeting.error_code = "queue_failed"
+        meeting.error_message = "Could not queue the transcription job"
+        db.commit()
+        raise HTTPException(
+            status_code=503, detail="Could not queue the transcription job"
+        ) from exc
     return {
         "meeting_id": meeting.id,
         "status": "uploaded",
@@ -211,7 +226,10 @@ def summarize_meeting(
         )
         store_summary(db, meeting, structured)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        logger.exception("Summarization failed for meeting %s", meeting.id)
+        raise HTTPException(
+            status_code=502, detail="Could not generate the summary"
+        ) from exc
     meeting.status = "summarized"
     meeting.error = None
     db.commit()
@@ -251,7 +269,10 @@ def post_discord(
     try:
         send_summary(settings.discord_webhook_url, meeting, summary)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        logger.exception("Discord delivery failed for meeting %s", meeting.id)
+        raise HTTPException(
+            status_code=502, detail="Could not send the summary to Discord"
+        ) from exc
     meeting.status = "sent"
     meeting.error = None
     db.commit()

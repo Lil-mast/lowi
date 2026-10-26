@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
+import httpx
+import jwt
 import pytest
 from app.config import Settings
 from app.db.models import Session as SessionRecord
 from app.db.session import SessionLocal
 from app.main import create_app
-from app.services.auth import AuthError, AuthIdentity
+from app.services.auth import AuthError, AuthIdentity, NeonAuthProvider
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
 
@@ -165,3 +169,111 @@ def test_registration_validates_input(neon_client):
         json={"email": "not-an-email", "password": "short", "name": ""},
     )
     assert response.status_code == 422
+
+
+def _neon_settings(**overrides) -> Settings:
+    values = {
+        "_env_file": None,
+        "app_env": "development",
+        "auth_mode": "neon",
+        "ui_base_url": "https://ui.example",
+        "neon_auth_base_url": "https://auth.example/neondb/auth",
+        "neon_auth_jwks_url": "https://auth.example/neondb/auth/.well-known/jwks.json",
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def test_neon_auth_sends_the_ui_origin():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["origin"] == "https://ui.example"
+        assert str(request.url) == "https://auth.example/neondb/auth/sign-up/email"
+        return httpx.Response(
+            200,
+            json={
+                "user": {
+                    "id": "neon-1",
+                    "email": "ada@example.com",
+                    "name": "Ada",
+                    "emailVerified": True,
+                }
+            },
+        )
+
+    provider = NeonAuthProvider(
+        _neon_settings(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    identity = provider.register("ada@example.com", "correct-horse", "Ada")
+    assert identity.id == "neon-1"
+    assert identity.email == "ada@example.com"
+
+
+def test_neon_jwt_uses_derived_issuer_and_audience():
+    private_key = Ed25519PrivateKey.generate()
+    now = int(datetime.now(UTC).timestamp())
+    token = jwt.encode(
+        {
+            "sub": "neon-1",
+            "email": "ada@example.com",
+            "name": "Ada",
+            "emailVerified": True,
+            "iss": "https://auth.example",
+            "aud": "https://auth.example",
+            "iat": now,
+            "exp": now + 900,
+        },
+        private_key,
+        algorithm="EdDSA",
+        headers={"kid": "test"},
+    )
+    provider = NeonAuthProvider(_neon_settings())
+    provider._jwks = SimpleNamespace(
+        get_signing_key_from_jwt=lambda _: SimpleNamespace(key=private_key.public_key())
+    )
+    identity = provider.verify_jwt(token)
+    assert identity.id == "neon-1"
+    assert identity.email == "ada@example.com"
+    assert identity.email_verified is True
+
+
+def test_neon_jwt_rejects_a_different_issuer():
+    private_key = Ed25519PrivateKey.generate()
+    now = int(datetime.now(UTC).timestamp())
+    token = jwt.encode(
+        {
+            "sub": "neon-1",
+            "email": "ada@example.com",
+            "iss": "https://evil.example",
+            "aud": "https://auth.example",
+            "iat": now,
+            "exp": now + 900,
+        },
+        private_key,
+        algorithm="EdDSA",
+    )
+    provider = NeonAuthProvider(_neon_settings())
+    provider._jwks = SimpleNamespace(
+        get_signing_key_from_jwt=lambda _: SimpleNamespace(key=private_key.public_key())
+    )
+    with pytest.raises(AuthError):
+        provider.verify_jwt(token)
+
+
+def test_neon_duplicate_signup_maps_to_conflict():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={
+                "message": "User already exists. Use another email.",
+                "code": "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL",
+            },
+        )
+
+    provider = NeonAuthProvider(
+        _neon_settings(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(AuthError) as caught:
+        provider.register("ada@example.com", "correct-horse", "Ada")
+    assert caught.value.status_code == 409

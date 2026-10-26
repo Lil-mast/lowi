@@ -8,16 +8,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import User
-from app.services.auth import AuthIdentity
+from app.services.auth import AuthError, AuthIdentity
 
 
 def upsert_auth_user(db: Session, identity: AuthIdentity) -> User:
-    """Resolve a Neon Auth identity to a local user, linking legacy emails."""
+    """Resolve a Neon Auth identity to a local user, linking legacy emails safely."""
     user = db.scalar(
         select(User).where(User.neon_auth_user_id == identity.id)
     )
     if user is None:
         user = db.scalar(select(User).where(User.email == identity.email))
+        if user is not None:
+            if user.neon_auth_user_id and user.neon_auth_user_id != identity.id:
+                raise AuthError("This email is linked to another account", 409)
+            if user.neon_auth_user_id is None and not identity.email_verified:
+                raise AuthError(
+                    "Verify your email before claiming this existing account", 403
+                )
     if user is None:
         user = User(
             email=identity.email,

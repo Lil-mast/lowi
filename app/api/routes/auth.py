@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -35,6 +35,8 @@ def _response(
     expires_at: datetime,
     user: User,
 ) -> AuthResponse:
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
     return AuthResponse(token=token, expires_at=expires_at, user=UserOut.model_validate(user))
 
 
@@ -60,12 +62,14 @@ def register(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ) -> AuthResponse:
+    if provider is None:
+        raise HTTPException(status_code=400, detail="Authentication is disabled")
     try:
         identity = provider.register(str(body.email), body.password, body.name)
+        user = upsert_auth_user(db, identity)
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
-    user = upsert_auth_user(db, identity)
     user_agent, ip = _client_meta(request)
     token, record = create_session(
         db,
@@ -85,12 +89,14 @@ def login(
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
 ) -> AuthResponse:
+    if provider is None:
+        raise HTTPException(status_code=400, detail="Authentication is disabled")
     try:
         identity = provider.login(str(body.email), body.password)
+        user = upsert_auth_user(db, identity)
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
-    user = upsert_auth_user(db, identity)
     user_agent, ip = _client_meta(request)
     token, record = create_session(
         db,

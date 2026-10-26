@@ -166,3 +166,51 @@ def test_empty_upload(client):
         files={"file": ("notes.mp3", b"", "audio/mpeg")},
     )
     assert response.status_code == 400
+
+
+def test_resummarize_keeps_action_item_status(client):
+    from app.db.models import ActionItem, Transcript
+    from app.db.session import SessionLocal
+    from sqlalchemy import select
+
+    client.app.state.runtime.complete_json = fake_complete
+    created = client.post("/meetings", json={"title": "Follow-up"})
+    meeting_id = created.json()["id"]
+    with SessionLocal() as db:
+        db.add(
+            Transcript(
+                meeting_id=meeting_id,
+                raw_text="We should ship the notes.",
+                diarized_json={},
+                language="en",
+            )
+        )
+        db.commit()
+
+    assert client.post(f"/meetings/{meeting_id}/summarize").status_code == 200
+    with SessionLocal() as db:
+        item = db.scalar(select(ActionItem).where(ActionItem.meeting_id == meeting_id))
+        assert item is not None
+        item.status = "done"
+        db.commit()
+
+    def updated(model, system, user):
+        return {
+            "decisions": [],
+            "action_items": [
+                {"description": "Send the recap", "owner": "Ada", "due_date": "not-a-date"},
+                {"description": "Book the room", "owner": None, "due_date": None},
+            ],
+            "open_questions": [],
+            "key_points": [],
+            "narrative": "Updated.",
+        }
+
+    client.app.state.runtime.complete_json = updated
+    assert client.post(f"/meetings/{meeting_id}/summarize").status_code == 200
+    detail = client.get(f"/meetings/{meeting_id}").json()
+    items = {item["description"]: item for item in detail["action_items"]}
+    assert set(items) == {"Send the recap", "Book the room"}
+    assert items["Send the recap"]["status"] == "done"
+    assert items["Send the recap"]["due_date"] is None
+    assert items["Book the room"]["status"] == "open"

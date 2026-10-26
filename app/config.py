@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # Jobs
     job_backend: Literal["inline", "arq"] = "inline"
 
+    # Live capture
+    elevenlabs_realtime_model: str = "scribe_v2_realtime"
+    live_commit_strategy: Literal["manual", "vad", "turn_prediction"] = "vad"
+    live_vad_silence_secs: float = 0.8
+    live_ticket_ttl_seconds: int = 900
+    live_max_minutes: int = 240
+
     # Public URLs
     public_base_url: str = "http://127.0.0.1:8000"
     ui_base_url: str = "http://127.0.0.1:8501"
@@ -66,10 +73,18 @@ def validate_settings(settings: Settings) -> None:
     if settings.app_env == "production":
         if settings.auth_mode != "neon":
             raise ValueError("AUTH_MODE must be 'neon' when APP_ENV=production")
-        if settings.secret_key == "change-me":
+        if not settings.secret_key or settings.secret_key == "change-me":
             raise ValueError("SECRET_KEY must be set when APP_ENV=production")
+        if len(settings.secret_key) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters in production")
         if settings.job_backend != "arq":
             raise ValueError("JOB_BACKEND must be 'arq' when APP_ENV=production")
+        if settings.storage_backend != "s3":
+            raise ValueError("STORAGE_BACKEND must be 's3' when APP_ENV=production")
+        if not settings.public_base_url.startswith("https://"):
+            raise ValueError("PUBLIC_BASE_URL must use https in production")
+        if not settings.ui_base_url.startswith("https://"):
+            raise ValueError("UI_BASE_URL must use https in production")
 
     if settings.auth_mode == "neon":
         missing = [
@@ -91,6 +106,14 @@ def validate_settings(settings: Settings) -> None:
 
     if settings.max_upload_mb < 1:
         raise ValueError("MAX_UPLOAD_MB must be at least 1")
+
+    if settings.live_ticket_ttl_seconds < 60:
+        raise ValueError("LIVE_TICKET_TTL_SECONDS must be at least 60")
+    if settings.live_max_minutes < 1:
+        raise ValueError("LIVE_MAX_MINUTES must be at least 1")
+    live_bytes = settings.live_max_minutes * 60 * 16_000 * 2
+    if live_bytes > settings.max_upload_mb * 1024 * 1024:
+        raise ValueError("LIVE_MAX_MINUTES exceeds MAX_UPLOAD_MB for PCM audio")
 
 
 @lru_cache

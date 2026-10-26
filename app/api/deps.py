@@ -67,7 +67,10 @@ def get_current_user(
             detail=exc.message,
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
-    return upsert_auth_user(db, identity)
+    try:
+        return upsert_auth_user(db, identity)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
 def get_meeting(
