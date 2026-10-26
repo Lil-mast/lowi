@@ -82,9 +82,14 @@ def clear_session() -> None:
         cookie_manager().delete(COOKIE_NAME)
 
 
-def login_screen() -> None:
+def login_screen(email_verification: bool = False) -> None:
     st.subheader("Sign in")
-    sign_in, create = st.tabs(["Sign in", "Create account"])
+    labels = ["Sign in", "Create account"]
+    if email_verification:
+        labels.append("Verify email")
+    tabs = st.tabs(labels)
+    sign_in, create = tabs[0], tabs[1]
+    verify_email = tabs[2] if email_verification else None
 
     with sign_in:
         with st.form("sign-in"):
@@ -133,9 +138,68 @@ def login_screen() -> None:
                     },
                 )
                 if response.is_error:
-                    st.error(error_text(response))
+                    if response.status_code == 403 and email_verification:
+                        st.info(error_text(response))
+                        st.caption(
+                            "Use the Verify email tab with the code from your inbox."
+                        )
+                    else:
+                        st.error(error_text(response))
                 else:
                     store_session(response.json())
+
+    if verify_email is not None:
+        with verify_email:
+            st.caption("Enter the code from your verification email.")
+            with st.form("verify-email"):
+                email = st.text_input("Email", key="verify-email")
+                password = st.text_input(
+                    "Password", type="password", key="verify-password"
+                )
+                otp = st.text_input(
+                    "Verification code",
+                    key="verify-otp",
+                    help="The code expires after 15 minutes.",
+                )
+                submitted = st.form_submit_button(
+                    "Verify email", icon=":material/mark_email_read:", type="primary"
+                )
+            if submitted:
+                if not email.strip() or not password or not otp.strip():
+                    st.warning("Fill in your email, password, and verification code.")
+                else:
+                    response = request(
+                        "POST",
+                        "/auth/verify-email",
+                        auth_required=False,
+                        json={
+                            "email": email.strip(),
+                            "password": password,
+                            "otp": otp.strip(),
+                        },
+                    )
+                    if response.is_error:
+                        st.error(error_text(response))
+                    else:
+                        store_session(response.json())
+            if st.button(
+                "Resend code",
+                icon=":material/mail:",
+                key="resend-verification",
+            ):
+                if not email.strip():
+                    st.warning("Enter your email first.")
+                else:
+                    response = request(
+                        "POST",
+                        "/auth/resend-verification",
+                        auth_required=False,
+                        json={"email": email.strip()},
+                    )
+                    if response.is_error:
+                        st.error(error_text(response))
+                    else:
+                        st.success("A new verification code is on its way.")
 
 
 logo = Path(__file__).parent / "bot.png"
@@ -173,7 +237,7 @@ if auth_required:
             st.session_state["token"] = token
 
     if not st.session_state.get("token"):
-        login_screen()
+        login_screen(bool(auth_config.get("email_verification", False)))
         st.stop()
 
     me = request("GET", "/auth/me")

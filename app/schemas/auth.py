@@ -16,6 +16,16 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+    otp: str = Field(min_length=4, max_length=12)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -34,3 +44,4 @@ class AuthConfigOut(BaseModel):
     email: bool = True
     google: bool = False
     required: bool = True
+    email_verification: bool = False

@@ -192,6 +192,7 @@ NEON_AUTH_BASE_URL=
 NEON_AUTH_JWKS_URL=
 NEON_AUTH_ISSUER=                     # optional; defaults to auth host origin
 NEON_AUTH_AUDIENCE=                   # optional; defaults to auth host origin
+REQUIRE_EMAIL_VERIFICATION=false      # required in production; uses Neon Auth email OTP
 
 ELEVENLABS_API_KEY=sk_...
 AGENTROUTER_API_KEY=sk_...
@@ -207,7 +208,7 @@ S3_BUCKET=
 S3_REGION=us-east-1                     # R2: auto
 ```
 
-Production validation requires `AUTH_MODE=neon`, `JOB_BACKEND=arq`, `STORAGE_BACKEND=s3`, an `https://` `PUBLIC_BASE_URL`, an `https://` `UI_BASE_URL`, a `SECRET_KEY` of at least 32 characters, and the Neon Auth URLs. See [SETUP.md](SETUP.md) for the full table.
+Production validation requires `AUTH_MODE=neon`, `JOB_BACKEND=arq`, `STORAGE_BACKEND=s3`, an `https://` `PUBLIC_BASE_URL`, an `https://` `UI_BASE_URL`, a `SECRET_KEY` of at least 32 characters, `REQUIRE_EMAIL_VERIFICATION=true`, and the Neon Auth URLs. See [SETUP.md](SETUP.md) for the full table.
 
 ---
 

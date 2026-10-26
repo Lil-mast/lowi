@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -16,26 +17,54 @@ from fastapi.testclient import TestClient
 
 
 class FakeAuthProvider:
-    def __init__(self) -> None:
-        self.users: dict[str, dict[str, str]] = {}
+    def __init__(self, *, verified: bool = True) -> None:
+        self.users: dict[str, dict] = {}
+        self.otps: dict[str, str] = {}
         self.next_id = 1
+        self.verified = verified
 
     def register(self, email: str, password: str, name: str) -> AuthIdentity:
         if email in self.users:
             raise AuthError("User already exists", 409)
         user_id = f"neon-{self.next_id}"
         self.next_id += 1
-        self.users[email] = {"id": user_id, "password": password, "name": name}
-        return AuthIdentity(id=user_id, email=email, name=name)
+        self.users[email] = {
+            "id": user_id,
+            "password": password,
+            "name": name,
+            "verified": self.verified,
+        }
+        return AuthIdentity(
+            id=user_id,
+            email=email,
+            name=name,
+            email_verified=self.verified,
+        )
 
     def login(self, email: str, password: str) -> AuthIdentity:
         user = self.users.get(email)
         if user is None or user["password"] != password:
             raise AuthError("Invalid email or password", 401)
-        return AuthIdentity(id=user["id"], email=email, name=user["name"])
+        return AuthIdentity(
+            id=user["id"],
+            email=email,
+            name=user["name"],
+            email_verified=user["verified"],
+        )
 
     def verify_jwt(self, token: str) -> AuthIdentity:
         raise AuthError("Invalid token", 401)
+
+    def send_verification_otp(self, email: str) -> None:
+        if email not in self.users:
+            raise AuthError("User not found", 404)
+        self.otps[email] = "123456"
+
+    def verify_email_otp(self, email: str, otp: str) -> None:
+        if self.otps.get(email) != otp:
+            raise AuthError("Invalid verification code", 401)
+        self.users[email]["verified"] = True
+        self.otps.pop(email, None)
 
 
 @pytest.fixture
@@ -80,6 +109,14 @@ def test_auth_is_required(neon_client):
     assert neon_client.get("/calendar/events").status_code == 401
 
 
+def test_auth_config_reports_email_verification(neon_client):
+    neon_client.app.state.settings.require_email_verification = True
+    config = neon_client.get("/auth/config")
+    assert config.status_code == 200
+    assert config.json()["required"] is True
+    assert config.json()["email_verification"] is True
+
+
 def test_register_login_and_me(neon_client):
     body = register(neon_client)
     assert body["user"]["email"] == "ada@example.com"
@@ -110,6 +147,52 @@ def test_duplicate_registration_and_bad_password(neon_client):
         json={"email": "ada@example.com", "password": "wrong-password"},
     )
     assert bad.status_code == 401
+
+
+def test_registration_requires_email_verification(neon_client):
+    neon_client.app.state.settings.require_email_verification = True
+    provider = neon_client.app.state.runtime.auth
+    provider.verified = False
+
+    response = neon_client.post(
+        "/auth/register",
+        json={"email": "ada@example.com", "password": "correct-horse", "name": "Ada"},
+    )
+    assert response.status_code == 403
+    assert "verification" in response.json()["detail"].lower()
+
+    blocked = neon_client.post(
+        "/auth/login",
+        json={"email": "ada@example.com", "password": "correct-horse"},
+    )
+    assert blocked.status_code == 403
+
+    resend = neon_client.post(
+        "/auth/resend-verification", json={"email": "ada@example.com"}
+    )
+    assert resend.status_code == 202
+
+    bad = neon_client.post(
+        "/auth/verify-email",
+        json={
+            "email": "ada@example.com",
+            "password": "correct-horse",
+            "otp": "000000",
+        },
+    )
+    assert bad.status_code == 401
+
+    verified = neon_client.post(
+        "/auth/verify-email",
+        json={
+            "email": "ada@example.com",
+            "password": "correct-horse",
+            "otp": "123456",
+        },
+    )
+    assert verified.status_code == 200
+    assert verified.json()["token"]
+    assert verified.json()["user"]["email"] == "ada@example.com"
 
 
 def test_user_data_is_isolated(neon_client):
@@ -207,6 +290,53 @@ def test_neon_auth_sends_the_ui_origin():
     identity = provider.register("ada@example.com", "correct-horse", "Ada")
     assert identity.id == "neon-1"
     assert identity.email == "ada@example.com"
+
+
+def test_neon_auth_email_verification_otp_paths():
+    calls: list[tuple[str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={"status": True})
+
+    provider = NeonAuthProvider(
+        _neon_settings(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    provider.send_verification_otp("ada@example.com")
+    provider.verify_email_otp("ada@example.com", "123456")
+
+    assert calls == [
+        (
+            "/neondb/auth/email-otp/send-verification-otp",
+            {"email": "ada@example.com", "type": "email-verification"},
+        ),
+        (
+            "/neondb/auth/email-otp/verify-email",
+            {"email": "ada@example.com", "otp": "123456"},
+        ),
+    ]
+
+
+def test_neon_auth_signup_without_verified_claim_is_unverified():
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "user": {
+                    "id": "neon-1",
+                    "email": "ada@example.com",
+                    "name": "Ada",
+                }
+            },
+        )
+
+    provider = NeonAuthProvider(
+        _neon_settings(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    identity = provider.register("ada@example.com", "correct-horse", "Ada")
+    assert identity.email_verified is False
 
 
 def test_neon_jwt_uses_derived_issuer_and_audience():

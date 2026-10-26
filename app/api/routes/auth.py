@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -21,7 +21,9 @@ from app.schemas.auth import (
     AuthResponse,
     LoginRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     UserOut,
+    VerifyEmailRequest,
 )
 from app.services.auth import AuthError, AuthProvider
 from app.services.sessions import create_session, revoke_session
@@ -51,6 +53,7 @@ def auth_config(settings: Settings = Depends(get_settings)) -> AuthConfigOut:
         email=True,
         google=settings.google_oauth_enabled,
         required=settings.auth_mode == "neon",
+        email_verification=settings.require_email_verification,
     )
 
 
@@ -66,6 +69,11 @@ def register(
         raise HTTPException(status_code=400, detail="Authentication is disabled")
     try:
         identity = provider.register(str(body.email), body.password, body.name)
+        if settings.require_email_verification and not identity.email_verified:
+            raise AuthError(
+                "Check your email for a verification code, then verify it to continue.",
+                403,
+            )
         user = upsert_auth_user(db, identity)
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -93,6 +101,8 @@ def login(
         raise HTTPException(status_code=400, detail="Authentication is disabled")
     try:
         identity = provider.login(str(body.email), body.password)
+        if settings.require_email_verification and not identity.email_verified:
+            raise AuthError("Verify your email before signing in.", 403)
         user = upsert_auth_user(db, identity)
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -106,6 +116,50 @@ def login(
         ip=ip,
     )
     return _response(token, record.expires_at, user)
+
+
+@router.post("/verify-email", response_model=AuthResponse)
+def verify_email(
+    body: VerifyEmailRequest,
+    request: Request,
+    provider: AuthProvider = Depends(get_auth_provider),
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> AuthResponse:
+    if provider is None:
+        raise HTTPException(status_code=400, detail="Authentication is disabled")
+    try:
+        provider.verify_email_otp(str(body.email), body.otp)
+        identity = provider.login(str(body.email), body.password)
+        if settings.require_email_verification and not identity.email_verified:
+            raise AuthError("Email verification failed", 403)
+        user = upsert_auth_user(db, identity)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    user_agent, ip = _client_meta(request)
+    token, record = create_session(
+        db,
+        user,
+        ttl_days=settings.session_ttl_days,
+        user_agent=user_agent,
+        ip=ip,
+    )
+    return _response(token, record.expires_at, user)
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+def resend_verification(
+    body: ResendVerificationRequest,
+    provider: AuthProvider = Depends(get_auth_provider),
+) -> dict[str, str]:
+    if provider is None:
+        raise HTTPException(status_code=400, detail="Authentication is disabled")
+    try:
+        provider.send_verification_otp(str(body.email))
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return {"status": "sent"}
 
 
 @router.post("/logout")

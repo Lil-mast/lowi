@@ -66,8 +66,29 @@ def test_production_valid_settings_pass():
             s3_bucket="bucket",
             public_base_url="https://api.example.com",
             ui_base_url="https://ui.example.com",
+            require_email_verification=True,
         )
     )
+
+
+def test_production_requires_email_verification():
+    with pytest.raises(ValueError, match="REQUIRE_EMAIL_VERIFICATION"):
+        validate_settings(
+            Settings(
+                _env_file=None,
+                app_env="production",
+                auth_mode="neon",
+                secret_key="x" * 32,
+                job_backend="arq",
+                neon_auth_base_url="https://auth.example/auth",
+                neon_auth_jwks_url="https://auth.example/auth/.well-known/jwks.json",
+                storage_backend="s3",
+                s3_bucket="bucket",
+                public_base_url="https://api.example.com",
+                ui_base_url="https://ui.example.com",
+                require_email_verification=False,
+            )
+        )
 
 
 def test_production_rejects_short_secret_key():

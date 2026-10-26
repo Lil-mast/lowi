@@ -12,7 +12,9 @@ Code: [app/api/routes/health.py](../app/api/routes/health.py), [app/db/migrate.p
 
 `POST /auth/register` and `POST /auth/login` call Neon Auth (Managed Better Auth), link the external identity to a local `users` row, and return a random LoWi session token. Only the SHA-256 hash of the token is stored. Send it as `Authorization: Bearer <token>`.
 
-`GET /auth/me` returns the current user. `POST /auth/logout` revokes the current session. `GET /auth/config` is public and tells the UI whether login is required.
+`GET /auth/me` returns the current user. `POST /auth/logout` revokes the current session. `GET /auth/config` is public and tells the UI whether login and email verification are required.
+
+When `REQUIRE_EMAIL_VERIFICATION=true`, registration returns `403` until the Neon Auth email OTP is confirmed. `POST /auth/resend-verification` sends a new code and `POST /auth/verify-email` verifies it, then returns a LoWi session. The Streamlit login screen shows a **Verify email** tab for this flow.
 
 The API sends `UI_BASE_URL`'s origin to Neon Auth. That origin must be in the branch's Neon Auth trusted domains, or sign-up and sign-in return `Invalid origin`. The API also accepts a Managed Better Auth Ed25519 JWT directly and verifies it against the branch JWKS; issuer and audience default to the auth host origin.
 

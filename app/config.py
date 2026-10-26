@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     neon_auth_jwks_url: str = ""
     neon_auth_issuer: str = ""
     neon_auth_audience: str = ""
+    require_email_verification: bool = False
     session_ttl_days: int = 30
     test_user_email: str = "test@lowi.local"
     test_user_name: str = "Test"
@@ -85,6 +86,8 @@ def validate_settings(settings: Settings) -> None:
             raise ValueError("PUBLIC_BASE_URL must use https in production")
         if not settings.ui_base_url.startswith("https://"):
             raise ValueError("UI_BASE_URL must use https in production")
+        if not settings.require_email_verification:
+            raise ValueError("REQUIRE_EMAIL_VERIFICATION must be true in production")
 
     if settings.auth_mode == "neon":
         missing = [
