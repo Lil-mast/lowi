@@ -2,7 +2,12 @@
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+class Attendee(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    email: EmailStr | None = None
 
 
 # MeetingCreate is the request model for creating a meeting.
@@ -11,6 +16,8 @@ class MeetingCreate(BaseModel):
     scheduled_at: datetime | None = None
     calendar_event_id: str | None = None
     agenda: str | None = Field(default=None, max_length=8000)
+    attendees: list[Attendee] = Field(default_factory=list, max_length=100)
+    project: str | None = Field(default=None, max_length=255)
     generate_prep: bool = False
 
 
@@ -52,8 +59,11 @@ class MeetingOut(BaseModel):
     status: str
     calendar_event_id: str | None
     agenda: str | None
+    attendees: list[dict] | None
+    project: str | None
     prep_brief: str | None
     error: str | None
+    error_code: str | None
     created_at: datetime
 
 

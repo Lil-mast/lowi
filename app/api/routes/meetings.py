@@ -1,21 +1,18 @@
 """Meeting endpoints."""
 
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Depends,
-    File,
-    HTTPException,
-    Request,
-    UploadFile,
-)
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_meeting, get_settings
-from app.db.models import ActionItem, Meeting, Recording, Summary, User
-from app.db.session import SessionLocal, get_db
+from app.db.models import ActionItem, Meeting, Recording, Summary, User, new_id
+from app.db.session import get_db
 from app.schemas.meetings import (
     ActionItemOut,
     MeetingCreate,
@@ -25,15 +22,33 @@ from app.schemas.meetings import (
     TranscriptOut,
 )
 from app.services.discord import send_summary
+from app.services.jobs import pipeline_job_id
 from app.services.pdf import render_summary_pdf
-from app.services.pipeline import run_pipeline
 from app.services.prep import build_prep_context, generate_prep
-from app.services.storage import save_audio
+from app.services.storage import (
+    StorageError,
+    UploadTooLarge,
+    audio_key,
+    store_upload,
+)
 from app.services.summarizer import (
     latest_transcript,
     store_summary,
     summarize_transcript,
 )
+
+ALLOWED_AUDIO_EXTENSIONS = {
+    ".aac",
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".mpeg",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".webm",
+}
 
 router = APIRouter(tags=["meetings"])
 
@@ -68,6 +83,8 @@ def create_meeting(
         scheduled_at=body.scheduled_at,
         calendar_event_id=body.calendar_event_id,
         agenda=body.agenda,
+        attendees=[attendee.model_dump() for attendee in body.attendees] or None,
+        project=body.project,
         status="scheduled",
     )
     db.add(meeting)
@@ -109,28 +126,70 @@ def read_meeting(
 @router.post("/meetings/{meeting_id}/upload")
 async def upload_audio(
     request: Request,
-    background: BackgroundTasks,
     meeting: Meeting = Depends(get_meeting),
     db: Session = Depends(get_db),
     settings=Depends(get_settings),
     file: UploadFile = File(...),
 ) -> dict[str, str]:
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Empty upload")
-    path = save_audio(settings.data_dir, meeting.id, file.filename or "audio.bin", content)
-    db.add(Recording(meeting_id=meeting.id, local_path=str(path), status="stored"))
+    filename = file.filename or "audio.bin"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported audio format")
+
+    queue = request.app.state.runtime.queue
+    storage = request.app.state.runtime.storage
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Job queue is not configured")
+
+    recording_id = new_id()
+    key = audio_key(meeting.id, recording_id, filename)
+    try:
+        stored = await asyncio.to_thread(
+            store_upload,
+            storage,
+            key,
+            file.file,
+            content_type=file.content_type or "application/octet-stream",
+            max_bytes=settings.max_upload_mb * 1024 * 1024,
+        )
+    except UploadTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db.add(
+        Recording(
+            id=recording_id,
+            meeting_id=meeting.id,
+            storage_backend=stored.backend,
+            storage_key=stored.key,
+            content_type=stored.content_type,
+            size_bytes=stored.size_bytes,
+            checksum_sha256=stored.checksum_sha256,
+            source="upload",
+            status="stored",
+        )
+    )
     meeting.status = "uploaded"
     meeting.error = None
+    meeting.error_code = None
+    meeting.error_message = None
+    meeting.pipeline_version = (meeting.pipeline_version or 1) + 1
     db.commit()
-    background.add_task(
-        run_pipeline,
-        meeting.id,
-        SessionLocal,
-        settings,
-        request.app.state.runtime.complete_json,
+
+    job_id = pipeline_job_id(meeting.id, meeting.pipeline_version)
+    await queue.enqueue(
+        "pipeline",
+        {"meeting_id": meeting.id, "force": True},
+        job_id=job_id,
+        max_tries=3,
     )
-    return {"meeting_id": meeting.id, "status": "uploaded"}
+    return {
+        "meeting_id": meeting.id,
+        "status": "uploaded",
+        "recording_id": recording_id,
+        "job_id": job_id,
+    }
 
 
 @router.post("/meetings/{meeting_id}/summarize", response_model=MeetingDetail)
