@@ -123,7 +123,8 @@ class S3Storage:
             aws_access_key_id=settings.s3_access_key_id or None,
             aws_secret_access_key=settings.s3_secret_access_key or None,
             config=Config(
-                s3={"addressing_style": "path" if settings.s3_force_path_style else "auto"}
+                s3={"addressing_style": "path" if settings.s3_force_path_style else "auto"},
+                signature_version="s3v4",
             ),
         )
 

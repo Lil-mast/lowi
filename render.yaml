@@ -24,11 +24,11 @@ envVarGroups:
       - key: STORAGE_BACKEND
         value: s3
       - key: S3_BUCKET
-        sync: false
+        value: lowi-audio
       - key: S3_REGION
         value: us-east-1
       - key: S3_ENDPOINT_URL
-        sync: false
+        value: https://br-summer-pine-av4hwgvw.storage.c-11.us-east-1.aws.neon.tech
       - key: S3_ACCESS_KEY_ID
         sync: false
       - key: S3_SECRET_ACCESS_KEY

@@ -3,8 +3,10 @@ from __future__ import annotations
 import io
 
 import pytest
+from app.config import Settings
 from app.services.storage import (
     LocalStorage,
+    S3Storage,
     StorageError,
     UploadTooLarge,
     audio_key,
@@ -61,3 +63,21 @@ def test_store_upload_rejects_empty_file(tmp_path):
 def test_audio_key_uses_a_safe_extension():
     assert audio_key("m1", "r1", "My Recording.MP3") == "meetings/m1/recordings/r1.mp3"
     assert audio_key("m1", "r1", "no-extension") == "meetings/m1/recordings/r1.bin"
+
+
+def test_s3_presigned_urls_use_signature_v4():
+    storage = S3Storage(
+        Settings(
+            _env_file=None,
+            s3_bucket="bucket",
+            s3_region="us-east-1",
+            s3_endpoint_url="https://storage.example",
+            s3_access_key_id="key",
+            s3_secret_access_key="secret",
+            s3_force_path_style=True,
+        )
+    )
+    url = storage.presigned_get("meetings/m1/audio.wav")
+    assert url is not None
+    assert "X-Amz-Algorithm=" in url
+    assert "X-Amz-Signature=" in url

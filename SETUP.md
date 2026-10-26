@@ -145,9 +145,9 @@ Use `python -m pytest` rather than the `pytest` script so the project virtualenv
 
 1. Create a Neon database and copy its connection string. The Render disk is ephemeral, so do not use SQLite there.
 2. Managed Better Auth is already enabled on the Neon `production` branch. Its `base_url` / `jwks_url` are in `render.yaml`, and `https://lowi-ui.onrender.com` is trusted. If Render assigns a different UI hostname, add it to Neon Auth trusted domains and update `UI_BASE_URL` in the `lowi-backend` group.
-3. Create an S3-compatible bucket (Neon Object Storage is the default choice) and copy its endpoint and keys.
+3. The private `lowi-audio` bucket exists on the Neon `production` branch, and its endpoint is pre-filled in `render.yaml`. Fill `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from a Neon storage credential (console **Connect → Storage**, or `neon credentials reveal <token-id>`).
 4. In Google Cloud, create an OAuth client and add the public API callback, `https://<lowi-api host>/calendar/callback`. This is optional unless you use Calendar.
-5. Connect the GitHub repo in Render and apply the blueprint. Fill the `lowi-backend` secrets once: `DATABASE_URL`, `ELEVENLABS_API_KEY`, `AGENTROUTER_API_KEY`, `DISCORD_WEBHOOK_URL`, `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY`. Do not set `SECRET_KEY`; Render generates it for the group. Fill the API-only Google values separately if you use Calendar.
+5. Connect the GitHub repo in Render and apply the blueprint. Fill the `lowi-backend` secrets once: `DATABASE_URL`, `ELEVENLABS_API_KEY`, `AGENTROUTER_API_KEY`, `DISCORD_WEBHOOK_URL`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY`. Do not set `SECRET_KEY`; Render generates it for the group. Fill the API-only Google values separately if you use Calendar.
 6. Confirm email verification is enabled in Neon Auth. The production branch already sends an OTP on sign-up; configure a dedicated SMTP provider before public launch.
 7. Connect Calendar once locally (or on the API host). Copy `refresh_token` from `data/google_token.json` into `GOOGLE_REFRESH_TOKEN` so a restart does not drop the connection.
 
