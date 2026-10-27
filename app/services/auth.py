@@ -46,6 +46,10 @@ class AuthProvider(Protocol):
 
     def verify_jwt(self, token: str) -> AuthIdentity: ...
 
+    def send_verification_otp(self, email: str) -> None: ...
+
+    def verify_email_otp(self, email: str, otp: str) -> None: ...
+
 
 class NeonAuthProvider:
     """Thin client for the branch's Managed Better Auth REST API."""
@@ -105,6 +109,15 @@ class NeonAuthProvider:
         body = self._request("/sign-in/email", {"email": email, "password": password})
         return _identity_from_body(body)
 
+    def send_verification_otp(self, email: str) -> None:
+        self._request(
+            "/email-otp/send-verification-otp",
+            {"email": email, "type": "email-verification"},
+        )
+
+    def verify_email_otp(self, email: str, otp: str) -> None:
+        self._request("/email-otp/verify-email", {"email": email, "otp": otp})
+
     def verify_jwt(self, token: str) -> AuthIdentity:
         if self._jwks is None:
             if not self.settings.neon_auth_jwks_url:
@@ -135,7 +148,7 @@ class NeonAuthProvider:
             id=str(claims["sub"]),
             email=email,
             name=str(claims.get("name") or email.split("@")[0]),
-            email_verified=bool(claims.get("emailVerified", True)),
+            email_verified=bool(claims.get("emailVerified", False)),
         )
 
 
@@ -158,7 +171,7 @@ def _identity_from_body(body: dict) -> AuthIdentity:
         id=user_id,
         email=email,
         name=str(user.get("name") or email.split("@")[0]),
-        email_verified=bool(user.get("emailVerified", True)),
+        email_verified=bool(user.get("emailVerified", False)),
     )
 
 

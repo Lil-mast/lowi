@@ -1,18 +1,10 @@
-services:
-  - type: redis
-    name: lowi-redis
-    plan: free
-    ipAllowList: []
-
-  - type: web
-    name: lowi-api
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    healthCheckPath: /health
+envVarGroups:
+  - name: lowi-backend
     envVars:
       - key: APP_ENV
         value: production
+      - key: SECRET_KEY
+        generateValue: true
       - key: DATABASE_URL
         sync: false
       - key: ELEVENLABS_API_KEY
@@ -27,23 +19,16 @@ services:
         value: deepseek-v4-flash
       - key: DISCORD_WEBHOOK_URL
         sync: false
-      - key: SECRET_KEY
-        generateValue: true
       - key: JOB_BACKEND
         value: arq
-      - key: REDIS_URL
-        fromService:
-          name: lowi-redis
-          type: redis
-          property: connectionString
       - key: STORAGE_BACKEND
         value: s3
       - key: S3_BUCKET
-        sync: false
+        value: lowi-audio
       - key: S3_REGION
         value: us-east-1
       - key: S3_ENDPOINT_URL
-        sync: false
+        value: https://br-summer-pine-av4hwgvw.storage.c-11.us-east-1.aws.neon.tech
       - key: S3_ACCESS_KEY_ID
         sync: false
       - key: S3_SECRET_ACCESS_KEY
@@ -55,17 +40,44 @@ services:
       - key: AUTH_MODE
         value: neon
       - key: NEON_AUTH_BASE_URL
-        sync: false
+        value: https://ep-summer-lab-av0g3bfu.neonauth.c-11.us-east-1.aws.neon.tech/neondb/auth
       - key: NEON_AUTH_JWKS_URL
-        sync: false
-      - key: NEON_AUTH_ISSUER
-        sync: false
-      - key: NEON_AUTH_AUDIENCE
-        sync: false
-      - key: PUBLIC_BASE_URL
-        sync: false
+        value: https://ep-summer-lab-av0g3bfu.neonauth.c-11.us-east-1.aws.neon.tech/neondb/auth/.well-known/jwks.json
       - key: UI_BASE_URL
-        sync: false
+        value: https://lowi-ui.onrender.com
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "true"
+      - key: SESSION_TTL_DAYS
+        value: "30"
+      - key: LIVE_MAX_MINUTES
+        value: "240"
+      - key: LIVE_TICKET_TTL_SECONDS
+        value: "900"
+
+services:
+  - type: redis
+    name: lowi-redis
+    plan: free
+    ipAllowList: []
+
+  - type: web
+    name: lowi-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: lowi-backend
+      - key: REDIS_URL
+        fromService:
+          name: lowi-redis
+          type: redis
+          property: connectionString
+      - key: PUBLIC_BASE_URL
+        fromService:
+          name: lowi-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -82,55 +94,17 @@ services:
     dockerContext: .
     dockerCommand: arq app.workers.tasks.WorkerSettings
     envVars:
-      - key: APP_ENV
-        value: production
-      - key: DATABASE_URL
-        sync: false
-      - key: ELEVENLABS_API_KEY
-        sync: false
-      - key: AGENTROUTER_API_KEY
-        sync: false
-      - key: AGENTROUTER_BASE_URL
-        value: https://agentrouter.org/v1
-      - key: AGENTROUTER_SUMMARY_MODEL
-        value: claude-opus-4-8
-      - key: AGENTROUTER_PREP_MODEL
-        value: deepseek-v4-flash
-      - key: DISCORD_WEBHOOK_URL
-        sync: false
-      - key: SECRET_KEY
-        generateValue: true
-      - key: JOB_BACKEND
-        value: arq
+      - fromGroup: lowi-backend
       - key: REDIS_URL
         fromService:
           name: lowi-redis
           type: redis
           property: connectionString
-      - key: STORAGE_BACKEND
-        value: s3
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_REGION
-        value: us-east-1
-      - key: S3_ENDPOINT_URL
-        sync: false
-      - key: S3_ACCESS_KEY_ID
-        sync: false
-      - key: S3_SECRET_ACCESS_KEY
-        sync: false
-      - key: S3_FORCE_PATH_STYLE
-        value: "true"
-      - key: AUTH_MODE
-        value: neon
-      - key: NEON_AUTH_BASE_URL
-        sync: false
-      - key: NEON_AUTH_JWKS_URL
-        sync: false
       - key: PUBLIC_BASE_URL
-        sync: false
-      - key: UI_BASE_URL
-        sync: false
+        fromService:
+          name: lowi-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: lowi-ui
@@ -140,4 +114,7 @@ services:
     dockerCommand: sh -c "streamlit run frontend/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"
     envVars:
       - key: LOWI_API_URL
-        sync: false
+        fromService:
+          name: lowi-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL

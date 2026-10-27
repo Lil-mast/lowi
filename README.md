@@ -192,6 +192,7 @@ NEON_AUTH_BASE_URL=
 NEON_AUTH_JWKS_URL=
 NEON_AUTH_ISSUER=                     # optional; defaults to auth host origin
 NEON_AUTH_AUDIENCE=                   # optional; defaults to auth host origin
+REQUIRE_EMAIL_VERIFICATION=false      # required in production; uses Neon Auth email OTP
 
 ELEVENLABS_API_KEY=sk_...
 AGENTROUTER_API_KEY=sk_...
@@ -207,7 +208,7 @@ S3_BUCKET=
 S3_REGION=us-east-1                     # R2: auto
 ```
 
-Production validation requires `AUTH_MODE=neon`, `JOB_BACKEND=arq`, `STORAGE_BACKEND=s3`, an `https://` `PUBLIC_BASE_URL`, an `https://` `UI_BASE_URL`, a `SECRET_KEY` of at least 32 characters, and the Neon Auth URLs. See [SETUP.md](SETUP.md) for the full table.
+Production validation requires `AUTH_MODE=neon`, `JOB_BACKEND=arq`, `STORAGE_BACKEND=s3`, an `https://` `PUBLIC_BASE_URL`, an `https://` `UI_BASE_URL`, a `SECRET_KEY` of at least 32 characters, `REQUIRE_EMAIL_VERIFICATION=true`, and the Neon Auth URLs. See [SETUP.md](SETUP.md) for the full table.
 
 ---
 
@@ -342,10 +343,10 @@ Simple webhook POST with embeds (title, action items as fields, link to PDF).
 
 ## Design Principles
 
-- **API-first** – everything useful is available via HTTP so you can later add a mobile app, Slack bot, or CLI.
-- **Human-in-the-loop optional** – summaries can be reviewed/edited before Discord/PDF are finalized.
-- **Cheap & simple first** – start with Neon + ARQ + S3-compatible storage. Add complexity only when needed.
-- **Privacy-aware** – audio lives in object storage; delete objects when you only need text, and never expose provider keys to the browser. A scheduled retention policy is a future step.
+- **API-first**: - everything useful is available via HTTP so you can later add a mobile app, Slack bot, or CLI.
+- **Human-in-the-loop optional**: - summaries can be reviewed/edited before Discord/PDF are finalized.
+- **Cheap & simple first**: - start with Neon + ARQ + S3-compatible storage. Add complexity only when needed.
+- **Privacy-aware**: -  audio lives in object storage; delete objects when you only need text, and never expose provider keys to the browser. A scheduled retention policy is a future step.
 
 ---
 

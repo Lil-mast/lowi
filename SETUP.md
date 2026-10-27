@@ -39,6 +39,7 @@ Fill in the keys you have. Leave a value empty to skip that step. The API still 
 | `NEON_AUTH_JWKS_URL` | JWT verification | The `jwks_url` returned by Neon, usually `<base_url>/.well-known/jwks.json` |
 | `NEON_AUTH_ISSUER` | JWT verification | Optional. Defaults to the origin of `NEON_AUTH_BASE_URL` (`https://ep-xxx...`). |
 | `NEON_AUTH_AUDIENCE` | JWT verification | Optional. Defaults to the origin of `NEON_AUTH_BASE_URL`. |
+| `REQUIRE_EMAIL_VERIFICATION` | Login | `true` in production. Registration returns a verification prompt until Neon Auth's email OTP is confirmed. |
 | `UI_BASE_URL` | Neon Auth | Public Streamlit origin. Add this exact origin to Neon Auth trusted domains. |
 | `SECRET_KEY` | Sessions/live tickets | Set to a random value of at least 32 characters; required in production. |
 | `SESSION_TTL_DAYS` | Login | Local LoWi session lifetime. Defaults to 30. |
@@ -69,9 +70,9 @@ Local development uses `AUTH_MODE=dev`, which seeds `local@lowi.local` and skips
 1. Enable Managed Better Auth on the Neon branch (Neon console → Auth, or `provision_neon_auth` through the Neon MCP server).
 2. Copy the returned `base_url` and `jwks_url` into `NEON_AUTH_BASE_URL` and `NEON_AUTH_JWKS_URL`.
 3. Add the public Streamlit origin to Neon Auth trusted domains, for example `http://127.0.0.1:8501` locally and `https://<lowi-ui host>` in production. The API sends this origin as the `Origin` header; without it Neon Auth rejects sign-up and sign-in with `Invalid origin`.
-4. Set `UI_BASE_URL` to that same origin and set `AUTH_MODE=neon`.
+4. Set `UI_BASE_URL` to that same origin, set `AUTH_MODE=neon`, and set `REQUIRE_EMAIL_VERIFICATION=true` if Neon Auth requires email verification.
 5. Restart the API and Streamlit. The UI will show the login screen.
-6. Register your real account, then move any legacy rows:
+6. Register your real account, enter the code from the verification email in the **Verify email** tab, then move any legacy rows:
 
 ```bash
 uv run python scripts/claim_legacy_data.py --email you@example.com
@@ -82,7 +83,17 @@ The script is idempotent. The first run is a dry run.
 
 Leave `NEON_AUTH_ISSUER` and `NEON_AUTH_AUDIENCE` empty unless you have a reason to override them. Managed Better Auth signs Ed25519 JWTs with the issuer and audience set to the auth host origin, not the full `/neondb/auth` path. The API derives both from `NEON_AUTH_BASE_URL`.
 
-Email/password registration is open by default in Managed Better Auth. Enable email verification in the Neon Auth settings before exposing a public deployment.
+The Neon `production` branch already has Managed Better Auth enabled. Its `base_url` and `jwks_url` are pre-filled in `render.yaml`, and `https://lowi-ui.onrender.com` is the trusted origin. Email verification is enabled with OTP delivery on sign-up. If Render assigns a different UI hostname, add that exact origin in Neon Auth and update `UI_BASE_URL` in `render.yaml`.
+
+For another branch, enable the same settings in the Neon Console under **Auth → Configuration**, or with the CLI:
+
+```bash
+neon neon-auth config email-password update \
+  --project-id <project-id> --branch <branch> \
+  --require-email-verification --send-verification-email-on-sign-up
+```
+
+The shared Neon email sender (`auth@mail.myneon.app`) is fine for initial testing. Configure a dedicated SMTP provider before relying on verification or password-reset email at volume.
 
 ## Run
 
@@ -130,14 +141,15 @@ Use `python -m pytest` rather than the `pytest` script so the project virtualenv
 
 ## Render
 
-`render.yaml` defines a Redis instance, an API web service, a worker service, and the Streamlit UI from the same Docker image. The API and worker share the database, bucket, and Redis instance; the UI only needs `LOWI_API_URL`.
+`render.yaml` defines a Redis instance, an API web service, a worker service, and the Streamlit UI from the same Docker image. Shared backend configuration lives in the `lowi-backend` environment group, so the API and worker receive the same generated `SECRET_KEY`. Render fills `PUBLIC_BASE_URL` from the API's `RENDER_EXTERNAL_URL` and `LOWI_API_URL` from the API service; `UI_BASE_URL` is set to `https://lowi-ui.onrender.com`.
 
 1. Create a Neon database and copy its connection string. The Render disk is ephemeral, so do not use SQLite there.
-2. Enable Managed Better Auth on the Neon branch, copy `base_url` / `jwks_url`, and add the public Streamlit origin to Neon Auth trusted domains.
-3. Create an S3-compatible bucket (Neon Object Storage is the default choice) and copy its endpoint and keys.
-4. In Google Cloud, create an OAuth client and add the public API callback, `https://<lowi-api host>/calendar/callback`.
-5. Connect the GitHub repo in Render and apply the blueprint. Fill the secret env vars. Set `LOWI_API_URL` on `lowi-ui` to the public API URL, set `UI_BASE_URL` on `lowi-api` and `lowi-worker` to the public Streamlit origin, set `PUBLIC_BASE_URL` on both backend services to the public API URL, and set `GOOGLE_REDIRECT_URI` on `lowi-api` to the API host plus `/calendar/callback`.
-6. Connect Calendar once locally (or on the API host). Copy `refresh_token` from `data/google_token.json` into `GOOGLE_REFRESH_TOKEN` so a restart does not drop the connection.
+2. Managed Better Auth is already enabled on the Neon `production` branch. Its `base_url` / `jwks_url` are in `render.yaml`, and `https://lowi-ui.onrender.com` is trusted. If Render assigns a different UI hostname, add it to Neon Auth trusted domains and update `UI_BASE_URL` in the `lowi-backend` group.
+3. The private `lowi-audio` bucket exists on the Neon `production` branch, and its endpoint is pre-filled in `render.yaml`. Fill `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from a Neon storage credential (console **Connect → Storage**, or `neon credentials reveal <token-id>`).
+4. In Google Cloud, create an OAuth client and add the public API callback, `https://<lowi-api host>/calendar/callback`. This is optional unless you use Calendar.
+5. Connect the GitHub repo in Render and apply the blueprint. Fill the `lowi-backend` secrets once: `DATABASE_URL`, `ELEVENLABS_API_KEY`, `AGENTROUTER_API_KEY`, `DISCORD_WEBHOOK_URL`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY`. Do not set `SECRET_KEY`; Render generates it for the group. Fill the API-only Google values separately if you use Calendar.
+6. Confirm email verification is enabled in Neon Auth. The production branch already sends an OTP on sign-up; configure a dedicated SMTP provider before public launch.
+7. Connect Calendar once locally (or on the API host). Copy `refresh_token` from `data/google_token.json` into `GOOGLE_REFRESH_TOKEN` so a restart does not drop the connection.
 
 Health check for the API is `GET /health`. The worker runs `arq app.workers.tasks.WorkerSettings`.
 
