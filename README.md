@@ -343,10 +343,10 @@ Simple webhook POST with embeds (title, action items as fields, link to PDF).
 
 ## Design Principles
 
-- **API-first** – everything useful is available via HTTP so you can later add a mobile app, Slack bot, or CLI.
-- **Human-in-the-loop optional** – summaries can be reviewed/edited before Discord/PDF are finalized.
-- **Cheap & simple first** – start with Neon + ARQ + S3-compatible storage. Add complexity only when needed.
-- **Privacy-aware** – audio lives in object storage; delete objects when you only need text, and never expose provider keys to the browser. A scheduled retention policy is a future step.
+- **API-first**: - everything useful is available via HTTP so you can later add a mobile app, Slack bot, or CLI.
+- **Human-in-the-loop optional**: - summaries can be reviewed/edited before Discord/PDF are finalized.
+- **Cheap & simple first**: - start with Neon + ARQ + S3-compatible storage. Add complexity only when needed.
+- **Privacy-aware**: -  audio lives in object storage; delete objects when you only need text, and never expose provider keys to the browser. A scheduled retention policy is a future step.
 
 ---
 
